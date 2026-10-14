@@ -1,0 +1,10 @@
+{
+  "game": "Need for Speed Most Wanted (2005), PC",
+  "executable": "speed.exe",
+  "sha256": "80774c2e5d619b4f120b48d4462896fd504c263399d203a238769cffde1d253c",
+  "image_base": "0x00400000",
+  "entry": "0x007c4040",
+  "size_of_image": "0x00678e4e",
+  "version": "No version resource; identify this reference by SHA-256",
+  "source_directory": "../Need for Speed Most Wanted 2005"
+}
