@@ -93,7 +93,12 @@ bool inputGuidEquals(uint32_t address,const std::array<uint8_t,16>& guid){return
 uint32_t createInputObject(uint32_t kind){
     uint32_t object=allocate(4),table=allocate(32*4);
     for(uint32_t slot=0;slot<32;++slot)write32(table+slot*4,inputMethodBase+kind*0x1000+slot*16);
-    write32(object,table);inputObjects.emplace(object,InputObject{kind,table});return object;
+    write32(object,table);inputObjects.emplace(object,InputObject{kind,table});
+    // Windows' system keyboard/mouse accept Acquire without an explicit
+    // SetCooperativeLevel (verified by tests/directinput_defaults.c).
+    // Most Wanted relies on these background/nonexclusive defaults.
+    if(kind==2||kind==3)inputObjects.at(object).cooperative=10;
+    return object;
 }
 void inputDeviceInstance(uint32_t address,uint32_t kind,uint32_t bytes){
     std::memset(ptr(address,bytes),0,bytes);write32(address,bytes);
@@ -378,7 +383,7 @@ void inputDispatch(){
         if(method==6){if(object.acquired){ret(0x800700aa,3);return;}if(read32(header+16)>4096){ret(diInvalid,3);return;}object.bufferSize=read32(header+16);}
         else write32(header+16,object.bufferSize);
         ret(0,3);return;}
-    case 7:if(kind==3){static unsigned logged=0;if(++logged<=10)NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Mouse Acquire size=%u cooperative=%x acquired=%d",object.size,object.cooperative,int(object.acquired));}
+    case 7:if(kind==2||kind==3){static unsigned logged=0;if(++logged<=16)NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Input Acquire kind=%u size=%u cooperative=%x acquired=%d from=%08x",kind,object.size,object.cooperative,int(object.acquired),g_cur_func);}
         if(!object.size||!object.cooperative){ret(diInvalid,1);return;}if(object.acquired){ret(1,1);return;}
         {std::lock_guard<std::mutex> lock(inputMutex);object.sequence=inputSequence;object.pending.clear();object.overflow=false;
          if(kind==4){object.lastValues.clear();for(auto& item:object.format)object.lastValues.push_back(padItemValue(object,item));++inputPadAcquired;
@@ -390,7 +395,12 @@ void inputDispatch(){
             if(kind==3){static unsigned logged=0;if(++logged<=10||logged%600==0)NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","Mouse GetDeviceState refused: acquired=%d size=%u want=%u (%u)",int(object.acquired),arg(1),object.size,logged);}
             ret(!object.acquired?diNotAcquired:diInvalid,3);return;}
         std::lock_guard<std::mutex> lock(inputMutex);std::memset(ptr(arg(2),object.size),0,object.size);
-        if(kind==3&&gameMouse){
+        if(kind==2&&g_cur_func>=imageBase&&g_cur_func<imageBase+imageSize){
+            inputDrivingMode=read32(0x00925E90)==6; // MW GameFlow state; raw keyboard has no driving action map.
+            static int lastEnter=-1;int enter=inputKeys[0x1c];
+            if(enter!=lastEnter){lastEnter=enter;NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Keyboard snapshot Enter=%02x bytes=%u objects=%zu caller=%08x",enter,object.size,object.format.size(),g_cur_func);}
+        }
+        if(kind==3){
             if(touchMoved){touchMoved=false;touchSettleMs=steadyMs();
                 // The cursor is in front-end units: menus hit-test it as
                 // (x-320, y-240) and draw the arrow from it (640x480 at any
@@ -400,7 +410,7 @@ void inputDispatch(){
                 // the finger at any render size).
                 float half=nfs_widescreen_hud_pos_x();
                 std::pair<int32_t,int32_t> point={int32_t(lroundf(guestPointerX.load()*2.f*half)),std::min(int32_t(guestPointerY.load()*480.f),479)};
-                inputMouseX=point.first-int32_t(read32(gameMouse+4));inputMouseY=point.second-int32_t(read32(gameMouse+8));}
+                if(gameMouse){inputMouseX=point.first-int32_t(read32(gameMouse+4));inputMouseY=point.second-int32_t(read32(gameMouse+8));}}
             else if(!touchButtons.empty()&&steadyMs()-touchSettleMs>=touchHoldMs){inputMouseButtons[0]=touchButtons.front();touchButtons.pop_front();touchSettleMs=steadyMs();}
         }
         for(auto item:object.format){uint32_t index=(item.type>>8)&0xffff,category=item.type&0xff;
@@ -471,7 +481,8 @@ void testGuestInput(){
     write32(items+4,1);write32(items+8,(0xc8<<8)|4);write32(items+20,7);write32(items+24,(0x1c<<8)|4);
     auto invoke=[&](uint32_t slot,std::vector<uint32_t> args){args.insert(args.begin(),keyboard);return callGuest(inputMethodBase+0x2000+slot*16,args);};
     if(invoke(11,{format})||invoke(9,{8,output})!=diNotAcquired)throw GuestStop("DirectInput format/acquisition check failed");
-    inputObjects.at(keyboard).cooperative=6;
+    // Exercise the same system-device default Most Wanted uses.
+    if(inputObjects.at(keyboard).cooperative!=10)throw GuestStop("System keyboard cooperative default differs from Windows");
     if(invoke(7,{}))throw GuestStop("DirectInput acquisition failed");
     setGuestKey(0xc8,true);setGuestKey(0x1c,true);std::memset(ptr(output,9),0xcc,9);
     if(invoke(9,{8,output})||*static_cast<uint8_t*>(ptr(output+1,1))!=0x80||*static_cast<uint8_t*>(ptr(output+7,1))!=0x80||*static_cast<uint8_t*>(ptr(output+8,1))!=0xcc)throw GuestStop("DirectInput guest offset/guard check failed");

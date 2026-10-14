@@ -11,6 +11,7 @@
 #include "game_profile.h"
 #endif
 #include <array>
+#include <cmath>
 #include <vector>
 #include <map>
 #include <memory>
@@ -333,6 +334,7 @@ uint32_t callGuest(uint32_t va,const std::vector<uint32_t>& args,uint32_t cleanu
 #include "guest_input.inc"
 #include "guest_audio.inc"
 #include "guest_network.inc"
+#include "guest_msvcrt.inc"
 void testGuestScheduling(){
     State original;original.save();uint32_t savedError=lastError,savedTLS=tlsValues[1087];
     g_eax=0x11223344;g_fs_base=0x21000000;g_st[0]=123.5;g_xmm[7].u64[0]=0x123456789abcdef0ull;
@@ -367,18 +369,22 @@ recomp_func_t resolveFunction(const std::string& dll, const std::string& name) {
     if(dll=="advapi32.dll"&&name=="RegOpenKeyA")return regOpenKeyA;
     if(dll=="advapi32.dll"&&name=="RegOpenKeyExA")return regOpenKeyExA;
     if(dll=="advapi32.dll"&&name=="RegCloseKey")return regCloseKey;
+    if(dll=="advapi32.dll"&&name=="RegCreateKeyA")return regOpenKeyA;  // same 3 arguments; the game key exists
     if(dll=="advapi32.dll"&&name=="RegQueryValueExA")return regQueryValueExA;
     if(dll=="advapi32.dll"&&name=="RegSetValueExA")return regSetValueExA;
     if(dll=="ws2_32.dll"||dll=="wsock32.dll"){auto found=networkFunctions.find(name);if(found!=networkFunctions.end())return found->second;}
+    if(dll=="msvcrt.dll"){auto found=msvcrtFunctions.find(name);if(found!=msvcrtFunctions.end())return found->second;}
     if(dll=="netapi32.dll"&&name=="Netbios")return netbios;
     if(dll=="tapi32.dll"&&name=="lineInitialize")return lineInitialize;
     if(dll=="tapi32.dll"&&name=="lineShutdown")return lineShutdown;
-    if(dll=="user32.dll") {auto found=windowFunctions.find(name);if(found!=windowFunctions.end())return found->second;}
+    if(dll=="user32.dll") {auto found=windowFunctions.find(name);if(found!=windowFunctions.end())return found->second;
+        auto extra=windowModuleFunctions.find(name);if(extra!=windowModuleFunctions.end())return extra->second;}
     if(dll=="winmm.dll") {auto found=timerFunctions.find(name);if(found!=timerFunctions.end())return found->second;}
     if (dll == "kernel32.dll") {
         auto resource=resourceFunctions.find(name);if(resource!=resourceFunctions.end())return resource->second;
         auto file=fileFunctions.find(name);if(file!=fileFunctions.end())return file->second;
         auto kernel=kernelFunctions.find(name); if(kernel!=kernelFunctions.end()) return kernel->second;
+        auto moduleOnly=kernelModuleFunctions.find(name); if(moduleOnly!=kernelModuleFunctions.end()) return moduleOnly->second;
         if (name=="GetVersionExA") return getVersion;
         if (name=="GetModuleHandleA") return moduleHandle;
         if (name=="HeapCreate") return heapCreate;
@@ -460,6 +466,7 @@ void bindImports(uint32_t base, uint32_t size, uint32_t directoryRva, uint32_t d
             if (thunk&PE_ORDINAL_FLAG) name="#"+std::to_string(thunk&0xffff);
             else { moduleRange(size,thunk,3); name=moduleString(base,size,thunk+2); }
             if (imports.size()>=4096) throw GuestStop("Too many PE imports");
+            if(dll=="msvcrt.dll")if(uint32_t cell=msvcrtData(name)){write32(base+uint32_t(iatRva),cell);continue;}  // data export
             uint32_t va=importBase+uint32_t(imports.size())*16;
             imports.push_back({dll+"!"+name,resolveFunction(dll,name)});
             write32(base+uint32_t(iatRva),va);
@@ -480,6 +487,9 @@ void loadImage(const char* path) {
     resourceRva=opt.DataDirectory[2].VirtualAddress;resourceSize=opt.DataDirectory[2].Size;
     if (imageBase!=0x400000 || imageSize!=0x678e4e || opt.AddressOfEntryPoint!=0x3c4040)  // speed.exe (Most Wanted, SHA-256 80774c2e...253c)
         throw GuestStop("PE layout does not match generated NFSMW code");
+    // The loader maps whole pages: speed.exe's SizeOfImage (0x678E4E) is not
+    // page aligned and its last section's raw data runs to 0x679000.
+    imageSize=(imageSize+0xfffu)&~0xfffu;
     memory->commit(imageBase,imageSize);
     imageRange(0,opt.SizeOfHeaders);
     if (opt.SizeOfHeaders>file.size()) throw GuestStop("Truncated PE headers");
@@ -515,8 +525,9 @@ uint32_t callGuest(uint32_t va, const std::vector<uint32_t>& args, uint32_t clea
 #include "guest_modules.inc"
 void timerTestCallback(){timerTestCalls.push_back(arg(0));ret(0,5);}
 void testGuestTimers(){
-    auto imported=[&](const std::string& name){for(uint32_t i=0;i<imports.size();++i)if(imports[i].name==name)return importBase+i*16;throw GuestStop("Timer test import unavailable");};
+    auto imported=[&](const std::string& name){for(uint32_t i=0;i<imports.size();++i)if(imports[i].name==name)return importBase+i*16;return 0u;};
     uint32_t set=imported("winmm.dll!timeSetEvent"),kill=imported("winmm.dll!timeKillEvent");
+    if(!set||!kill){NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Guest timer self-check skipped: the game imports no timeSetEvent/timeKillEvent");return;}
     auto wait=[&](unsigned count){auto until=std::chrono::steady_clock::now()+std::chrono::seconds(2);while(timerTestCalls.size()<count){if(std::chrono::steady_clock::now()>until)throw GuestStop("Timer callback deadline failed");checkGuestProgress();yieldGuestMachine(1);}};
     timerTestActive=true;timerTestCalls.clear();
     try{
@@ -554,8 +565,9 @@ void testGuestFileTime(){
     NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Guest UTC FILETIME conversions passed: epoch, milliseconds, guards and invalid input");
 }
 void testGuestCriticalSections(){
-    auto imported=[&](const std::string& name){for(uint32_t i=0;i<imports.size();++i)if(imports[i].name=="kernel32.dll!"+name)return importBase+i*16;throw GuestStop("Critical-section import unavailable");};
+    auto imported=[&](const std::string& name){for(uint32_t i=0;i<imports.size();++i)if(imports[i].name=="kernel32.dll!"+name)return importBase+i*16;return 0u;};
     uint32_t initialize=imported("InitializeCriticalSection"),enter=imported("EnterCriticalSection"),leave=imported("LeaveCriticalSection"),remove=imported("DeleteCriticalSection");
+    if(!initialize||!enter||!leave||!remove){NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Guest critical-section self-check skipped: imports missing");return;}
     uint32_t data=allocate(32);std::memset(ptr(data,32),0xa5,32);
     callGuest(initialize,{data});callGuest(enter,{data});callGuest(enter,{data});
     bool okay=read32(data+8)==2&&read32(data+12)==guestThreadId&&read32(data+24)==0xa5a5a5a5u;
@@ -616,6 +628,8 @@ extern "C" recomp_func_t recomp_lookup(uint32_t va) {
 extern "C" recomp_func_t nfs_abk_lookup(uint32_t va);  // src/runtime/nfs_abk.h
 extern "C" int nfs_guest_readable(uint32_t va,uint32_t n){return memory&&memory->readable(va,n);}
 extern "C" recomp_func_t recomp_lookup_manual(uint32_t va) {
+    if(crtSortTestActive&&va==crtSortTestAddress)return crtQsort;
+    if(crtSortTestActive&&va==crtCompareTestAddress)return crtCompareTest;
     if(timerTestActive&&va==timerTestAddress)return timerTestCallback;
     // Routines of EA's sound banks run from the heap: their lifted copies (nfs_abk.h).
     if((va>=GuestHeaps::firstArena&&va<GuestHeaps::firstArenaEnd)||(va>=GuestHeaps::secondArena&&va-GuestHeaps::secondArena<GuestHeaps::secondArenaSize))
@@ -687,6 +701,7 @@ std::string connectGuestRuntime(const char* executable) {
         testGuestTimers();
         testGuestFileTime();
         testGuestCriticalSections();
+        testGuestQsort();
         // Restore a clean CPU state before executing the real CRT entry.
         fresh.load();
         bindDeferredModuleImports();
@@ -728,6 +743,7 @@ void setGuestResolution(unsigned width,unsigned height){
     std::lock_guard<MachineMutex> lock(machine);if(memory)return;
     if(width<320||height<240||width>8192||height>8192){renderWidth=renderHeight=0;return;}
     renderWidth=width;renderHeight=height;
+    nfs_widescreen_set_resolution(width,height);
 #if defined(__ANDROID__) || defined(NFS_D3D9_BACKEND)
     setD3D9RenderSize(width,height);
 #endif

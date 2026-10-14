@@ -1,5 +1,6 @@
-void winFormatA(){
-    uint32_t output=arg(0),arguments=arg(2);auto format=guestString(arg(1));
+// printf-style formatting of a guest format string and va_list (wvsprintfA,
+// msvcrt _vsnprintf): the integer, character and string conversions.
+std::string formatGuestA(const std::string& format,uint32_t arguments){
     std::string result;
     for(size_t position=0;position<format.size();){
         if(format[position]!='%'){result+=format[position++];continue;}
@@ -29,6 +30,10 @@ void winFormatA(){
         if(width>piece.size()){size_t padding=width-piece.size();if(left)piece.append(padding,' ');else piece.insert(0,padding,' ');}
         result+=piece;if(result.size()>1023)throw GuestStop("wvsprintf result exceeds Windows buffer");
     }
+    return result;
+}
+void winFormatA(){
+    uint32_t output=arg(0);auto result=formatGuestA(guestString(arg(1)),arg(2));
     if(result.size()>1023)throw GuestStop("wvsprintf result exceeds Windows buffer");
     std::memcpy(ptr(output,result.size()+1),result.c_str(),result.size()+1);ret(uint32_t(result.size()),3);
 }

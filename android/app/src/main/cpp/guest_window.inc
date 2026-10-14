@@ -43,10 +43,17 @@ void windowLong(bool set){
 }
 void getWindowLong(){windowLong(false);}void setWindowLong(){windowLong(true);}
 void adjustWindowRect(){if(!arg(0)){lastError=87;ret(0,3);return;}if(arg(2))throw GuestStop("Android guest window menu sizing pending");ret(1,3);}
+uint32_t currentCursor{},activeWindow{};int32_t cursorVisibility{};
 void showWindow(){
     auto window=windows.find(arg(0));if(window==windows.end()){lastError=1400;ret(0,2);return;}
     bool previous=window->second.visible;window->second.visible=arg(1)!=0;
-    windowMessage(arg(0),0x18,window->second.visible,0);ret(previous,2);
+    uint32_t handle=arg(0),command=arg(1);bool visible=window->second.visible;
+    windowMessage(handle,0x18,visible,0);
+    if(visible&&command!=4&&command!=8){uint32_t old=activeWindow;activeWindow=handle;
+        if(old&&old!=handle){windowMessage(old,8,handle,0);windowMessage(old,6,0,handle);}
+        windowMessage(handle,0x1c,1,guestThreadId);windowMessage(handle,6,1,old);windowMessage(handle,7,old,0);
+    }else if(!visible&&activeWindow==handle){activeWindow=0;windowMessage(handle,8,0,0);windowMessage(handle,6,0,0);windowMessage(handle,0x1c,0,guestThreadId);}
+    ret(previous,2);
 }
 void setWindowPos(){
     uint32_t handle=arg(0),flags=arg(6);auto window=windows.find(handle);if(window==windows.end()){lastError=1400;ret(0,7);return;}
@@ -67,7 +74,6 @@ void beginPaint(){
     std::memset(ptr(out,64),0,64);write32(out,context);write32(out+16,window->second.width);write32(out+20,window->second.height);ret(context,2);
 }
 void endPaint(){bool ok=arg(1)&&paintContexts.erase(read32(arg(1)));if(!ok)lastError=6;ret(ok,2);}
-uint32_t currentCursor{},activeWindow{};int32_t cursorVisibility{};
 void setCursor(){uint32_t old=currentCursor;currentCursor=arg(0);ret(old,1);}
 void showCursor(){cursorVisibility+=arg(0)?1:-1;ret(cursorVisibility,1);}
 void getActiveWindow(){ret(activeWindow,0);}
@@ -107,7 +113,9 @@ std::pair<int32_t,int32_t> pointerInWindow(){
     int32_t width=std::max(window->second.width,1),height=std::max(window->second.height,1);
     // Speed.exe's window: client pixels are its back buffer (0x71A96C), as GetClientRect reports.
     if(game::presentParams&&activeWindow==(game::windowHandle?read32(game::windowHandle):0u)){int32_t w=int32_t(read32(game::presentParams)),h=int32_t(read32(game::presentParams+4));if(w>0&&h>0&&w<=8192&&h<=8192){width=w;height=h;}}
-    return {std::min(int32_t(guestPointerX.load()*float(width)),width-1),std::min(int32_t(guestPointerY.load()*float(height)),height-1)};
+    // Invert the centered HUD projection so menu hit tests follow the touch.
+    float x=(guestPointerX.load()-.5f)*(nfs_widescreen_hud_pos_x()/320.f)+.5f;
+    return {std::clamp(int32_t(x*float(width)),0,width-1),std::min(int32_t(guestPointerY.load()*float(height)),height-1)};
 }
 void enqueueGuestPointer(int phase){  // 0 down, 1 move, 2 up
     std::lock_guard<std::mutex> lock(messageMutex);

@@ -6,7 +6,13 @@ std::filesystem::path gamePath(std::string guest){
     std::replace(guest.begin(),guest.end(),'\\','/');auto normalized=lower(guest);
     if(normalized=="c:/nfsmw")guest.clear();
     else if(normalized.rfind("c:/nfsmw/",0)==0)guest=guest.substr(9);
-    else if(guest.find(':')!=std::string::npos||guest.rfind("//",0)==0)throw GuestStop("Unsupported guest path: "+guest);
+    else if(guest.find(':')!=std::string::npos||guest.rfind("//",0)==0){
+        // Outside the game folder (Most Wanted probes C:\bin.dat): a sandbox under
+        // nfsmw/_outside, so a read finds nothing, as on a PC without the file.
+        std::string flat;for(char c:guest)flat+=(c==':'||c=='/')?'_':c;
+        static unsigned logged=0;if(++logged<=8)NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Guest path outside the game folder: %s -> _outside/%s",guest.c_str(),flat.c_str());
+        return std::filesystem::path(hostGameRoot)/"_outside"/flat;
+    }
     else {if(!guest.empty()&&guest.front()=='/')guest.erase(0,1);else{auto current=guestWorkingDirectory.substr(8);std::replace(current.begin(),current.end(),'\\','/');if(!current.empty())guest=current+"/"+guest;}}
     auto relative=std::filesystem::path(guest).lexically_normal();for(const auto& part:relative)if(part=="..")throw GuestStop("Guest path leaves nfsmw: "+guest);
     auto result=std::filesystem::path(hostGameRoot);

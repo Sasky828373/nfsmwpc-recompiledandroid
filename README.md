@@ -20,7 +20,9 @@ This is **not** an emulator and **not** a port of the Xbox 360 version: every fu
 | MW-M6/M7 Win32, Direct3D 9, first frame | ✅ D3DX effects loaded from the game's own resources |
 | MW-M8/M9 Intro, menus, world | 🔧 3D world with traffic renders (≈1,450 draws/frame), 75 s+ without crashes; menus and input in progress |
 | MW-M10+ Racing, police, saving | ⏳ |
-| Android ARM64 APK | ⏳ |
+| Android ARM64 APK | Builds and runs: cinematics, menu input and user-confirmed gameplay; race quality/control validation ongoing |
+
+Android runtime fixes and current verification limits: [bring-up notes](docs/ANDROID_BRINGUP.md).
 
 ### Layout
 

@@ -33,6 +33,7 @@ final class RacingControlsView extends View {
     private Pointer pointer;
     private int pointerId=-1;
     private float pointerX, pointerY;
+    private boolean pointerVisible;
     private final Runnable textInput;
     private final Runnable configureTilt;
     private final Runnable configureFrameLimit;
@@ -111,29 +112,29 @@ final class RacingControlsView extends View {
         add(w-118,16,46,racing?"menu":"wheel",MODE);
         if(racing) {
             add(16,16,46,"pause",1);
-            // NFSU1 keyboard defaults ("NFS Underground Game" action map): no map or SMS.
+            // Most Wanted PC keyboard defaults.
             add(72,16,46,"reset",0x13);   // Respot: R
             if(style.equals("classic")) {
                 add(20,bottom-92,92,"left",0xcb);
                 add(124,bottom-92,92,"right",0xcd);
-                add(228,bottom-66,62,"handbrake",0x2a);   // Handbrake: LShift
-                add(30,bottom-160,52,"shiftUp",0x1e);     // Shift Up: A
-                add(92,bottom-160,52,"shiftDown",0x2c);   // Shift Down: Z
+                add(228,bottom-66,62,"handbrake",0x39);   // Handbrake: Space
+                add(30,bottom-160,52,"shiftUp",0x2a);     // Shift Up: Left Shift
+                add(92,bottom-160,52,"shiftDown",0x1d);   // Shift Down: Left Control
                 add(154,bottom-160,52,"camera",0x2e);
                 add(w-110,bottom-150,90,150,PEDAL,"gas",0xc8,0xFF1E7A4A);
                 add(w-206,bottom-108,82,108,PEDAL,"brake",0xd0,0xFF8A2A2A);
-                add(w-290,bottom-72,70,"nitro",0x39);     // Nitrous: Space
+                add(w-290,bottom-72,70,"nitro",0x38);     // Nitrous: Left Alt
             } else {
                 boolean xbox=style.equals("xbox");
                 add(24,bottom-160,160,160,WHEEL,"stick",STICK,0);
                 add(w-106,bottom-150,86,150,PEDAL,"gas",0xc8,0xFF1E7A4A);
                 add(w-198,bottom-108,78,108,PEDAL,"brake",0xd0,0xFF8A2A2A);
-                add(w-252,bottom-178,58,xbox?"A":"×",0x2a);
-                add(w-186,bottom-238,58,xbox?"B":"○",0x39);
+                add(w-252,bottom-178,58,xbox?"A":"×",0x39);
+                add(w-186,bottom-238,58,xbox?"B":"○",0x38);
                 add(w-318,bottom-238,58,xbox?"X":"□",0x2e);
                 add(w-252,bottom-298,58,xbox?"Y":"△",0x30);
-                add(30,bottom-228,52,"shiftUp",0x1e);
-                add(92,bottom-228,52,"shiftDown",0x2c);
+                add(30,bottom-228,52,"shiftUp",0x2a);
+                add(92,bottom-228,52,"shiftDown",0x1d);
             }
         } else {
             float pad=60,cx=24+pad*1.5f,cy=bottom-pad*1.5f;
@@ -166,6 +167,13 @@ final class RacingControlsView extends View {
             drawToolbarButton(canvas,new RectF(w/2-65,70,w/2+65,106),"OPCIONES");
         }
         canvas.restore();
+        if(pointerVisible&&!racing&&!editing) {
+            path.reset();path.moveTo(pointerX,pointerY);
+            path.lineTo(pointerX+8,pointerY+28);path.lineTo(pointerX+15,pointerY+19);
+            path.lineTo(pointerX+27,pointerY+18);path.close();
+            fill.setColor(Color.WHITE);canvas.drawPath(path,fill);
+            line.setColor(Color.BLACK);line.setStrokeWidth(2);canvas.drawPath(path,line);
+        }
     }
     private void drawControl(Canvas canvas,Control c) {
         boolean on=c.held>0, picked=editing&&c==selected;
@@ -411,7 +419,7 @@ final class RacingControlsView extends View {
     void setPointer(Pointer pointer) { this.pointer=pointer; }
     private void pointerTouch(float x,float y,int phase) {
         if(pointer==null||getWidth()==0||getHeight()==0)return;
-        pointerX=x;pointerY=y;pointer.touch(x/getWidth(),y/getHeight(),phase);
+        pointerX=x;pointerY=y;pointerVisible=true;invalidate();pointer.touch(x/getWidth(),y/getHeight(),phase);
     }
     private void pointerRelease() { if(pointerId>=0){pointerId=-1;pointerTouch(pointerX,pointerY,2);} }
     void releaseAll() { for(Control c:fingers.values()) release(c); fingers.clear(); pointerRelease(); invalidate(); }

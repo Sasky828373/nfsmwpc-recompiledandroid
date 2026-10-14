@@ -80,11 +80,11 @@ void attachTextureSurface(uint32_t texture,uint32_t surface){
     if(!child.parent){child.parent=texture;++objects.at(texture).children;}
     else if(child.parent!=texture)throw std::runtime_error("D3D9 subresource changed parent");
 }
-// Underground 2 copies its initial depth surface from 0x870854 into the first
-// render surface descriptor at 0x86e774, then releases both on device Reset.
-// The copy does not call AddRef, so account for that owned descriptor here.
+// MW obtains depth at 0x6BD7ED into 0x982A2C, then copies it at
+// 0x6BD123 into descriptor 0x93DAC4 without AddRef. Rebuild releases
+// both (0x6BD646 and 0x6BD6A3+); retain that descriptor's ownership.
 void retainInitialDepthDescriptor(uint32_t outputAddress,uint32_t surfaceAddress){
-    if(outputAddress!=0x870854||!surfaceAddress)return;
+    if(outputAddress!=0x982A2C||!surfaceAddress)return;
     auto& surface=objects.at(surfaceAddress);surface.native->AddRef();++surface.references;
 }
 float floatValue(uint32_t bits){float value;std::memcpy(&value,&bits,4);return value;}

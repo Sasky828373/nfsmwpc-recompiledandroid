@@ -29,7 +29,7 @@ foreach(relative src/host/profiler.c src/runtime/d3d9_trace.c src/runtime/native
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${NFS_CORE}/${relative}")
 endforeach()
 add_executable(NFSMW-Recompiled
-  src/host/main.c src/runtime/nfs_runtime.c src/runtime/overrides.c src/runtime/dinput_trace.c src/runtime/video_adapter.c src/shims/mw_shims.c
+  src/host/main.c src/runtime/nfs_runtime.c src/runtime/overrides.c src/runtime/dinput_trace.c src/runtime/widescreen.c src/shims/mw_shims.c
   ${SHARED_SOURCES} "${RT}/native32/native32.c"
   "${RT}/hybrid/hybrid.c" "${RT}/recomp32/image_loader.c" "${RT}/recomp32/recomp_trace.c"
   $<TARGET_OBJECTS:mw_generated>)

@@ -38,6 +38,50 @@ void releaseMutex(){
     if(value->second->owner!=guestThreadId){lastError=288;ret(0,1);return;}
     if(!--value->second->depth)value->second->owner=0;ret(1,1);
 }
+// Semaphores and waitable timers (Most Wanted's streaming and frame pacing).
+struct GuestSemaphore{int32_t count,maximum;};
+std::map<uint32_t,std::shared_ptr<GuestSemaphore>> semaphoreHandles;
+uint32_t nextSemaphoreHandle=0xf00a0000;
+void createSemaphore(){
+    int32_t initial=int32_t(arg(1)),maximum=int32_t(arg(2));
+    if(maximum<=0||initial<0||initial>maximum){lastError=87;ret(0,4);return;}
+    uint32_t handle=nextSemaphoreHandle++;semaphoreHandles.emplace(handle,std::make_shared<GuestSemaphore>(GuestSemaphore{initial,maximum}));
+    lastError=0;ret(handle,4);
+}
+void releaseSemaphore(){
+    auto found=semaphoreHandles.find(arg(0));if(found==semaphoreHandles.end()){lastError=6;ret(0,3);return;}
+    auto& value=*found->second;int32_t release=int32_t(arg(1));
+    if(release<=0||value.count+release>value.maximum){lastError=298;ret(0,3);return;}  // ERROR_TOO_MANY_POSTS
+    if(arg(2))write32(arg(2),uint32_t(value.count));
+    value.count+=release;ret(1,3);
+}
+// A waitable timer is an event that the waits switch on once its due time passes.
+struct GuestWaitTimer{std::chrono::steady_clock::time_point due;uint32_t periodMs=0;bool armed=false;};
+std::map<uint32_t,GuestWaitTimer> waitTimers;
+void createWaitableTimer(){
+    uint32_t handle=nextEventHandle++;eventHandles.emplace(handle,std::make_shared<GuestEvent>(GuestEvent{arg(1)!=0,false}));
+    waitTimers[handle]={};lastError=0;ret(handle,3);
+}
+void setWaitableTimer(){
+    auto timer=waitTimers.find(arg(0));if(timer==waitTimers.end()){lastError=6;ret(0,6);return;}
+    int64_t due=int64_t(uint64_t(read32(arg(1)))|uint64_t(read32(arg(1)+4))<<32);
+    auto now=std::chrono::steady_clock::now();
+    if(due<0)timer->second.due=now+std::chrono::microseconds(-due/10);
+    else{  // absolute FILETIME (UTC)
+        int64_t unix100ns=due-116444736000000000LL;auto wall=std::chrono::system_clock::now().time_since_epoch();
+        auto delta=std::chrono::microseconds(unix100ns/10)-std::chrono::duration_cast<std::chrono::microseconds>(wall);
+        timer->second.due=now+(delta.count()>0?delta:std::chrono::microseconds(0));
+    }
+    timer->second.periodMs=arg(2);timer->second.armed=true;eventHandles[arg(0)]->signaled=false;
+    if(arg(3))throw GuestStop("SetWaitableTimer completion routine pending");
+    ret(1,6);
+}
+void pollWaitTimer(uint32_t handle){
+    auto timer=waitTimers.find(handle);if(timer==waitTimers.end()||!timer->second.armed)return;
+    if(std::chrono::steady_clock::now()<timer->second.due)return;
+    eventHandles[handle]->signaled=true;
+    if(timer->second.periodMs)timer->second.due+=std::chrono::milliseconds(timer->second.periodMs);else timer->second.armed=false;
+}
 void createEvent(){
     auto name=guestString(arg(3));std::shared_ptr<GuestEvent> event;
     if(!name.empty()&&namedMutexes.count(name)&&!namedMutexes[name].expired()){lastError=6;ret(0,4);return;}
@@ -119,25 +163,32 @@ void waitThread(){
         while(value->owner&&value->owner!=guestThreadId){if(timeout!=UINT32_MAX&&std::chrono::steady_clock::now()>=deadline){ret(258,2);return;}checkGuestProgress();yieldGuestMachine(1);}
         value->owner=guestThreadId;++value->depth;bool abandoned=value->abandoned;value->abandoned=false;ret(abandoned?128:0,2);return;
     }
+    if(auto semaphore=semaphoreHandles.find(handle);semaphore!=semaphoreHandles.end()){
+        auto value=semaphore->second;auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout);
+        while(value->count<=0){if(timeout!=UINT32_MAX&&std::chrono::steady_clock::now()>=deadline){ret(258,2);return;}checkGuestProgress();yieldGuestMachine(1);}
+        --value->count;ret(0,2);return;
+    }
     auto eventFound=eventHandles.find(handle);
     if(found==threadHandles.end()&&eventFound==eventHandles.end()){lastError=6;ret(UINT32_MAX,2);return;}
     auto thread=found==threadHandles.end()?nullptr:found->second;
     auto event=eventFound==eventHandles.end()?nullptr:eventFound->second;
     auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout);
-    while(thread?!thread->done:!event->signaled){if(timeout!=UINT32_MAX&&std::chrono::steady_clock::now()>=deadline){ret(258,2);return;}checkGuestProgress();yieldGuestMachine(1);}
+    while(thread?!thread->done:(pollWaitTimer(handle),!event->signaled)){if(timeout!=UINT32_MAX&&std::chrono::steady_clock::now()>=deadline){ret(258,2);return;}checkGuestProgress();yieldGuestMachine(1);}
     if(event&&!event->manual)event->signaled=false;
     ret(0,2);
 }
 // WaitForMultipleObjects over the same thread, event and mutex objects as WaitForSingleObject.
 bool waitableReady(uint32_t handle){
     if(auto mutex=mutexHandles.find(handle);mutex!=mutexHandles.end())return !mutex->second->owner||mutex->second->owner==guestThreadId;
-    if(auto event=eventHandles.find(handle);event!=eventHandles.end())return event->second->signaled;
+    if(auto semaphore=semaphoreHandles.find(handle);semaphore!=semaphoreHandles.end())return semaphore->second->count>0;
+    if(auto event=eventHandles.find(handle);event!=eventHandles.end()){pollWaitTimer(handle);return event->second->signaled;}
     return threadHandles.at(handle)->done;
 }
 bool acquireWaitable(uint32_t handle){  // true when an abandoned mutex was taken
     if(auto mutex=mutexHandles.find(handle);mutex!=mutexHandles.end()){
         auto& value=*mutex->second;value.owner=guestThreadId;++value.depth;bool abandoned=value.abandoned;value.abandoned=false;return abandoned;
     }
+    if(auto semaphore=semaphoreHandles.find(handle);semaphore!=semaphoreHandles.end()){--semaphore->second->count;return false;}
     if(auto event=eventHandles.find(handle);event!=eventHandles.end()&&!event->second->manual)event->second->signaled=false;
     return false;
 }
@@ -147,7 +198,7 @@ void waitMultiple(){
     std::vector<uint32_t> handles(count);
     for(uint32_t i=0;i<count;++i){
         handles[i]=read32(list+i*4);
-        if(!mutexHandles.count(handles[i])&&!eventHandles.count(handles[i])&&!threadHandles.count(handles[i])){lastError=6;ret(UINT32_MAX,4);return;}
+        if(!mutexHandles.count(handles[i])&&!eventHandles.count(handles[i])&&!threadHandles.count(handles[i])&&!semaphoreHandles.count(handles[i])){lastError=6;ret(UINT32_MAX,4);return;}
     }
     auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout);
     WaitScope scope(all?"WaitForMultipleObjects(all)":"WaitForMultipleObjects(any)",handles[0]);

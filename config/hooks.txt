@@ -1,1 +1,14 @@
 # Most Wanted PC: no addresses imported from Underground.
+0x006DF1CC  Disable motion blur before its original option comparison
+0x006C27F9  GetRacingResolution 640x480 return: native engine dimensions
+0x006C2810  GetRacingResolution 800x600 return
+0x006C2827  GetRacingResolution 1024x768 return
+0x006C283E  GetRacingResolution 1280x960 return
+0x006C2855  GetRacingResolution 1280x1024 return
+0x006C286C  GetRacingResolution 1600x1200/default return
+0x006CF4F6  Camera ratio before fstp, verified DB 40 18 DA 70 14
+0x006CF56C  Camera horizontal scale after fdivr
+0x006CF57E  Camera perspective scale after fmul
+0x006CF5E2  Camera reflection scale after fdivr
+0x006D12CC  Centered HUD quad left projection before fstp
+0x006D1316  Centered HUD quad right projection before fstp
