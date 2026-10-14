@@ -15,13 +15,19 @@ root=Path(__file__).resolve().parent.parent
 image_path=root/'work/speed.analysis.exe'
 catalog=json.loads((root/'work/catalog.json').read_text())
 hooks=set(driver.read_va_list(root/'config/hooks.txt'))
+# Include old sites when selecting functions so deleting a hook removes it from
+# locally generated code as well as from future full lifts.
+previous_hooks=set()
+for generated in (root/'src/recomp/gen').glob('recomp_[0-9]*.c'):
+    previous_hooks.update(int(site,16) for site in re.findall(r'RECOMP_HOOK\(0x([0-9A-Fa-f]+)u\)',generated.read_text()))
+selected_sites=hooks|previous_hooks
 pe=pefile.PE(str(image_path));base=pe.OPTIONAL_HEADER.ImageBase;image=pe.get_memory_mapped_image()
 info=driver.analyze_pe(str(image_path));iat=driver.build_iat_map(info)
 lifter=Lifter(iat_map=iat,func_names={},lifted={f['address'] for f in catalog['functions']},precise_carry=True,hook_sites=hooks)
 decoder=Cs(CS_ARCH_X86,CS_MODE_32);decoder.detail=True
 replacement={};observed=set()
 for descriptor in catalog['functions']:
-    if not any(start<=hook<end for start,end,*_ in descriptor['blocks'] for hook in hooks):continue
+    if not any(start<=hook<end for start,end,*_ in descriptor['blocks'] for hook in selected_sites):continue
     function=driver.rebuild(decoder,image,base,descriptor)
     for block in function.blocks.values():
         observed.update(i.address for i in block.instructions if i.address in hooks)
