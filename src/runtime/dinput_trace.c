@@ -150,7 +150,7 @@ typedef HRESULT (__stdcall *getdata_t)(void *, DWORD, void *, DWORD *, DWORD);
 static getdata_t g_orig_getdata;
 static HRESULT __stdcall hk_getdata(void *dev, DWORD cb, void *od, DWORD *cnt, DWORD flags) {
     static int bg = -1;
-    if (bg < 0) { const char *e = getenv("NFSU_BACKGROUND"); bg = e && *e == '1'; }
+    if (bg < 0) { const char *e = getenv("NFSMW_BACKGROUND"); bg = e && *e == '1'; }
     HRESULT hr = g_orig_getdata(dev, cb, od, cnt, flags);
     /* Background test runs: the device reads the desktop keyboard even without
      * focus, so whatever the user types elsewhere would drive the game. Drop
@@ -163,6 +163,42 @@ static HRESULT __stdcall hk_getdata(void *dev, DWORD cb, void *od, DWORD *cnt, D
     }
     return hr;
 }
+/* ---- GetDeviceState vtable hook: keyboard snapshots (Most Wanted) ----
+ * speed.exe reads the keyboard as a 256-byte state, not through an action map,
+ * so NFSMW_TAP (buffered action events) cannot drive it. NFSMW_KEYS="dik@ms,..."
+ * (hex DIK code, ms since start) holds that key down for 150 ms in the snapshot.
+ * With NFSMW_BACKGROUND=1 the desktop keyboard is cleared from the snapshot. */
+typedef HRESULT (__stdcall *getstate_t)(void *, DWORD, void *);
+static getstate_t g_orig_getstate;
+static struct { uint32_t dik, at; } g_keys[32];
+static int g_nkeys;
+static void keys_init(void) {
+    static int done; if (done) return; done = 1;
+    const char *e = getenv("NFSMW_KEYS");
+    while (e && *e && g_nkeys < 32) {
+        char *end; g_keys[g_nkeys].dik = strtoul(e, &end, 16);
+        if (*end != '@') break;
+        g_keys[g_nkeys].at = strtoul(end + 1, &end, 10); g_nkeys++;
+        e = *end == ',' ? end + 1 : NULL;
+    }
+    for (int i = 0; i < g_nkeys; i++) NFS_LOG(WIN32, "NFSMW_KEYS: DIK %02X at %u ms", g_keys[i].dik, g_keys[i].at);
+}
+static HRESULT __stdcall hk_getstate(void *dev, DWORD cb, void *data) {
+    static int bg = -1;
+    if (bg < 0) { const char *e = getenv("NFSMW_BACKGROUND"); bg = e && *e == '1'; }
+    HRESULT hr = g_orig_getstate(dev, cb, data);
+    if (cb != 256 || !data) return hr;
+    if (bg) { memset(data, 0, 256); hr = 0; }
+    DWORD now = GetTickCount() - g_t0;
+    for (int i = 0; i < g_nkeys; i++)
+        if (now >= g_keys[i].at && now < g_keys[i].at + 150u && g_keys[i].dik < 256) {
+            ((uint8_t *)data)[g_keys[i].dik] = 0x80; hr = 0;
+            static uint32_t logged_at;
+            if (logged_at != g_keys[i].at) { logged_at = g_keys[i].at; NFS_LOG(WIN32, "NFSMW_KEYS: DIK %02X down at %u ms", g_keys[i].dik, now); }
+        }
+    return hr;
+}
+
 void nfs_dinput_hook(uint32_t di8) {
     static const GUID kbd = { 0x6F1D2B61, 0xD5A0, 0x11CF, { 0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 } };
     typedef HRESULT (__stdcall *createdev_t)(void *, const GUID *, void **, void *);
@@ -177,6 +213,11 @@ void nfs_dinput_hook(uint32_t di8) {
     g_orig_getdata = (getdata_t)(uintptr_t)dvt[10];
     dvt[10] = (uint32_t)(uintptr_t)hk_getdata;
     VirtualProtect(&dvt[10], 4, old, &old);
+    keys_init();
+    VirtualProtect(&dvt[9], 4, PAGE_EXECUTE_READWRITE, &old);
+    g_orig_getstate = (getstate_t)(uintptr_t)dvt[9];
+    dvt[9] = (uint32_t)(uintptr_t)hk_getstate;
+    VirtualProtect(&dvt[9], 4, old, &old);
     ((ULONG (__stdcall *)(void *))(uintptr_t)dvt[2])(dev);     /* Release */
     NFS_LOG(WIN32, "dinput: GetDeviceData hooked (vtable %08X)", (uint32_t)(uintptr_t)dvt);
 }
