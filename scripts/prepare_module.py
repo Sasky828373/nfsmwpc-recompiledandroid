@@ -15,12 +15,28 @@ them under ../work (never committed). The original file is never written.
 import json, sys, pefile
 
 
-def main(src, base, dst, seeds_path):
+def relocate_file(src, base, dst):
+    """Copy `src` with every HIGHLOW base relocation applied for `base` and the
+    header's ImageBase changed: no other byte moves. pefile's relocate_image +
+    write left d3dx9_26.dll (imports merged into .text) with an import
+    directory pefile itself then rejected, so the IAT went unnamed."""
     pe = pefile.PE(src)
-    old = pe.OPTIONAL_HEADER.ImageBase
-    pe.relocate_image(base)
-    pe.OPTIONAL_HEADER.ImageBase = base
-    pe.write(dst)
+    data = bytearray(open(src, "rb").read())
+    delta = (base - pe.OPTIONAL_HEADER.ImageBase) & 0xFFFFFFFF
+    for block in getattr(pe, "DIRECTORY_ENTRY_BASERELOC", []):
+        for entry in block.entries:
+            if entry.type != 3:  # IMAGE_REL_BASED_HIGHLOW
+                continue
+            off = pe.get_offset_from_rva(entry.rva)
+            v = int.from_bytes(data[off:off + 4], "little")
+            data[off:off + 4] = ((v + delta) & 0xFFFFFFFF).to_bytes(4, "little")
+    off = pe.OPTIONAL_HEADER.get_file_offset() + 28   # ImageBase in IMAGE_OPTIONAL_HEADER32
+    data[off:off + 4] = base.to_bytes(4, "little")
+    open(dst, "wb").write(bytes(data))
+
+
+def main(src, base, dst, seeds_path):
+    relocate_file(src, base, dst)
 
     pe = pefile.PE(dst)
     code = [s for s in pe.sections if s.Characteristics & 0x20000000]
@@ -40,7 +56,7 @@ def main(src, base, dst, seeds_path):
                 pointers.add(value)
     seeds += [{"address": va, "note": "relocated code pointer"} for va in sorted(pointers)]
     json.dump(seeds, open(seeds_path, "w"), indent=1)
-    print(f"[*] {src}: base {old:#x} -> {base:#x}, {len(seeds)} seeds ({len(pointers)} code pointers) -> {dst}")
+    print(f"[*] {src}: base {pefile.PE(src, fast_load=True).OPTIONAL_HEADER.ImageBase:#x} -> {base:#x}, {len(seeds)} seeds ({len(pointers)} code pointers) -> {dst}")
 
 
 if __name__ == "__main__":

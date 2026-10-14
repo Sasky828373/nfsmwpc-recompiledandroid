@@ -81,7 +81,7 @@ def restore_seeds(dis, iat, funcs, seeds):
           f"{len(bogus)} uncalled bogus starts that covered a seed removed")
 
 
-def cmd_catalog(exe, seeds_path, out):
+def cmd_catalog(exe, seeds_path, out, seeds_only=False):
     info = analyze_pe(exe)
     iat = build_iat_map(info)
     data = open(exe, "rb").read()
@@ -90,6 +90,14 @@ def cmd_catalog(exe, seeds_path, out):
         a = e.get("address") if isinstance(e, dict) else e
         seeds.add(int(a, 0) if isinstance(a, str) else a)
     dis = Disassembler(data, info.image_base, info.sections)
+    if seeds_only:
+        # A module whose entries are known (exports, relocated code pointers):
+        # follow only what they reach. d3dx9_26's HLSL compiler is ~150 KB tied
+        # together by jumps, and every prologue/call-shaped address inside it
+        # re-decoded the whole region (2,524 blocks each) until memory ran out.
+        import disasm32
+        dis.find_branch_targets = lambda *a, **k: set()
+        disasm32.prologue_starts = lambda *a, **k: set()
     t = time.time()
     funcs = dis.find_functions(info.code_start, info.code_end, iat, seeds=seeds,
                                release_operands=True)
@@ -154,7 +162,7 @@ def read_va_list(path):
     return out
 
 
-def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix=""):
+def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix="", extra_exclude=None):
     import pefile
     from lift32 import Lifter
     info = analyze_pe(exe)
@@ -172,6 +180,12 @@ def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix=""):
     cfg = os.path.join(HERE, "..", "config")
     overrides = read_va_list(os.path.join(cfg, "overrides.txt"))
     excluded = read_va_list(os.path.join(cfg, "exclude.txt"))
+    if extra_exclude:
+        # A module's own list (JSON array of VAs), e.g. d3dx9_26 entries that
+        # decode ASCII strings stored after code: arpl/insb/bound... never occur
+        # in its real code.
+        for va in json.load(open(extra_exclude)):
+            excluded.setdefault(int(va), "decodes data (module exclude list)")
     hooks = read_va_list(os.path.join(cfg, "hooks.txt"))
     md = Cs(CS_ARCH_X86, CS_MODE_32)
     md.detail = True
@@ -275,11 +289,12 @@ def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix=""):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a and a[0] == "catalog":
-        cmd_catalog(a[1], a[2], a[3])
+        cmd_catalog(a[1], a[2], a[3], "--seeds-only" in a)
     elif a and a[0] == "lift":
         split = int(a[a.index("--split") + 1]) if "--split" in a else 400
         names = a[a.index("--names") + 1] if "--names" in a else None
         prefix = a[a.index("--prefix") + 1] if "--prefix" in a else ""
-        cmd_lift(a[1], a[2], a[3], split, names, prefix)
+        extra = a[a.index("--exclude") + 1] if "--exclude" in a else None
+        cmd_lift(a[1], a[2], a[3], split, names, prefix, extra)
     else:
         sys.exit(__doc__)

@@ -8,6 +8,7 @@
 #if defined(__ANDROID__) || defined(NFS_D3D9_BACKEND)
 #include "d3d9_bridge.h"
 #include "nfs_widescreen.h"
+#include "game_profile.h"
 #endif
 #include <array>
 #include <vector>
@@ -420,6 +421,11 @@ std::string moduleString(uint32_t base, uint32_t size, uint32_t rva) {
     throw GuestStop("Unterminated PE import name");
 }
 void imageRange(uint32_t rva, uint64_t bytes) { moduleRange(imageSize,rva,bytes); }
+struct DeferredModuleImport{std::string dll,name;uint32_t slot;};
+std::vector<DeferredModuleImport> deferredModuleImports;
+bool isLiftedModuleName(const std::string& dll);
+uint32_t loadGuestModule(const std::string& name);
+bool guestModuleExport(uint32_t handle,const std::string& name,uint32_t& va);
 // Writes an import token into every IAT slot of a mapped image (Speed.exe or a game DLL).
 void bindImports(uint32_t base, uint32_t size, uint32_t directoryRva, uint32_t directorySize) {
     moduleRange(size,directoryRva,directorySize);
@@ -430,6 +436,19 @@ void bindImports(uint32_t base, uint32_t size, uint32_t directoryRva, uint32_t d
         if (!descriptor.Name && !descriptor.FirstThunk) { terminated=true; break; }
         auto dll=moduleString(base,size,descriptor.Name);
         std::transform(dll.begin(),dll.end(),dll.begin(),[](unsigned char c){return char(std::tolower(c));});
+        if(isLiftedModuleName(dll)){
+            // A DLL that runs as lifted code (d3dx9_26.dll): its slots get the
+            // export VAs once it is mapped and its DllMain ran (bindDeferredModuleImports).
+            uint32_t names=descriptor.OriginalFirstThunk ? descriptor.OriginalFirstThunk : descriptor.FirstThunk;
+            for(uint32_t i=0;;++i){
+                uint32_t nameRva=names+i*4,iatRva=descriptor.FirstThunk+i*4;
+                moduleRange(size,nameRva,4);moduleRange(size,iatRva,4);
+                uint32_t thunk=read32(base+nameRva);if(!thunk)break;
+                std::string name=(thunk&PE_ORDINAL_FLAG)?"#"+std::to_string(thunk&0xffff):moduleString(base,size,thunk+2);
+                deferredModuleImports.push_back({dll,name,base+iatRva});write32(base+iatRva,0);
+            }
+            continue;
+        }
         if(!modules.count(dll)) modules[dll]=0x71000000u+uint32_t(modules.size())*0x10000u;
         uint32_t names=descriptor.OriginalFirstThunk ? descriptor.OriginalFirstThunk : descriptor.FirstThunk;
         for (uint32_t i=0;;++i) {
@@ -554,15 +573,18 @@ void testGuestCriticalSections(){
 extern "C" const recomp_dispatch_entry_t server_recomp_dispatch_table[];
 extern "C" const uint32_t server_recomp_dispatch_count;
 #endif
+// d3dx9_26.dll lifted at 0x00B00000 (src/recomp/gen_d3dx, run_lift.py --prefix d3dx_).
+extern "C" const recomp_dispatch_entry_t d3dx_recomp_dispatch_table[];
+extern "C" const uint32_t d3dx_recomp_dispatch_count;
 namespace {
 // Every indirect call and virtual method resolves its target here, so use an
 // open-addressing table (built once, read-only afterwards) instead of a binary
 // search over ~28k entries with a cache miss per step.
 struct DispatchHash {
-    static constexpr uint32_t slots=1u<<16;
+    static constexpr uint32_t slots=1u<<17;
     std::unique_ptr<uint32_t[]> keys{new uint32_t[slots]()};
     std::unique_ptr<recomp_func_t[]> funcs{new recomp_func_t[slots]()};
-    static uint32_t slot(uint32_t va){return (va*0x9e3779b1u)>>16;}
+    static uint32_t slot(uint32_t va){return (va*0x9e3779b1u)>>15;}
     void add(const recomp_dispatch_entry_t* table,uint32_t count){
         for(uint32_t i=0;i<count;++i){
             uint32_t va=table[i].address,s=slot(va);
@@ -571,8 +593,9 @@ struct DispatchHash {
         }
     }
     DispatchHash(){
-        static_assert(slots>2*(27742+1531),"dispatch hash load factor");
+        static_assert(slots>2*(41262+9868),"dispatch hash load factor");  // speed.exe + d3dx9_26
         add(recomp_dispatch_table,recomp_dispatch_count);
+        add(d3dx_recomp_dispatch_table,d3dx_recomp_dispatch_count);
 #ifdef NFS_SERVER_DLL
         add(server_recomp_dispatch_table,server_recomp_dispatch_count);
 #endif
@@ -665,6 +688,8 @@ std::string connectGuestRuntime(const char* executable) {
         testGuestFileTime();
         testGuestCriticalSections();
         // Restore a clean CPU state before executing the real CRT entry.
+        fresh.load();
+        bindDeferredModuleImports();
         fresh.load();
         NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Entering actual lifted CRT entry %08x",entry);
         uint32_t result=callGuest(entry,{});

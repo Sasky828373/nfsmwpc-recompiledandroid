@@ -11,7 +11,7 @@ int32_t inputMouseX{},inputMouseY{},inputMouseZ{};
 // (0x706498: +4 x, +8 y, window pixels, clamped to the client rect), so the
 // delta handed out is "finger minus current cursor". Button changes are queued
 // and handed out one poll after the cursor reached the finger.
-constexpr uint32_t gameMouse=0x706498;
+constexpr uint32_t gameMouse=game::mouseObject;
 bool touchMoved=false;std::deque<uint8_t> touchButtons;int64_t touchSettleMs=0;
 // The game reads the mouse several times per frame from different places, and
 // the front end looks at the button edge once per frame: hold every change.
@@ -390,7 +390,7 @@ void inputDispatch(){
             if(kind==3){static unsigned logged=0;if(++logged<=10||logged%600==0)NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","Mouse GetDeviceState refused: acquired=%d size=%u want=%u (%u)",int(object.acquired),arg(1),object.size,logged);}
             ret(!object.acquired?diNotAcquired:diInvalid,3);return;}
         std::lock_guard<std::mutex> lock(inputMutex);std::memset(ptr(arg(2),object.size),0,object.size);
-        if(kind==3){
+        if(kind==3&&gameMouse){
             if(touchMoved){touchMoved=false;touchSettleMs=steadyMs();
                 // The cursor is in front-end units: menus hit-test it as
                 // (x-320, y-240) and draw the arrow from it (640x480 at any

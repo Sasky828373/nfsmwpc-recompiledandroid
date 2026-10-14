@@ -17,7 +17,7 @@ set(PCRECOMP "${NFS_ROOT}/../pcrecomp")
 set(NFSU2_ROOT "${NFS_ROOT}/../nfsu2-recompiled" CACHE PATH "nfsu2-recompiled checkout")
 set(DXVK_SOURCE "${NFSU2_ROOT}/build/dxvk-source" CACHE PATH "Prepared DXVK native source")
 set(DXVK_ANDROID_STATIC ON CACHE BOOL "Link into application" FORCE)
-add_subdirectory("${NFS_ROOT}/ports/dxvk_android" "${CMAKE_CURRENT_BINARY_DIR}/dxvk")
+add_subdirectory("${NFSU2_ROOT}/ports/dxvk_android" "${CMAKE_CURRENT_BINARY_DIR}/dxvk")
 set(GEN_DIR "${NFS_ROOT}/src/recomp/gen")
 file(GLOB GEN_SOURCES CONFIGURE_DEPENDS "${GEN_DIR}/recomp_*.c")
 if(NOT GEN_SOURCES)
@@ -51,6 +51,14 @@ file(GLOB SERVER_GEN_SOURCES CONFIGURE_DEPENDS "${SERVER_GEN_DIR}/server_recomp_
 list(APPEND ANDROID_GEN_SOURCES ${SERVER_GEN_SOURCES})
 # x86 routines of EA's sound banks, lifted from the local Sound/**.abk
 # (scripts/abk_module.py + run_lift.py --prefix abk_; see src/runtime/nfs_abk.h).
+# d3dx9_26.dll (DirectX runtime) lifted as a module: speed.exe imports its
+# effect framework and math, and Android has no D3DX.
+set(D3DX_GEN_DIR "${NFS_ROOT}/src/recomp/gen_d3dx")
+file(GLOB D3DX_GEN_SOURCES CONFIGURE_DEPENDS "${D3DX_GEN_DIR}/d3dx_recomp_*.c")
+if(NOT D3DX_GEN_SOURCES)
+    message(FATAL_ERROR "No d3dx9_26 code in ${D3DX_GEN_DIR}: prepare_module.py + run_lift.py --seeds-only/--prefix d3dx_")
+endif()
+list(APPEND ANDROID_GEN_SOURCES ${D3DX_GEN_SOURCES})
 set(ABK_GEN_DIR "${NFS_ROOT}/src/recomp/gen_abk")
 file(GLOB ABK_GEN_SOURCES CONFIGURE_DEPENDS "${ABK_GEN_DIR}/abk_*.c")
 if(NOT ABK_GEN_SOURCES)
@@ -103,7 +111,7 @@ target_compile_options(nfsmw_diagnostics PRIVATE -O2 -Wall -Wextra -Werror -Wno-
 add_library(nfsmw_android SHARED main.cpp guest_runtime.cpp d3d9_bridge.cpp vulkan_driver.cpp "${NFS_ROOT}/src/runtime/overrides.c" "${NFS_ROOT}/src/runtime/widescreen.c" "${NFS_ROOT}/src/runtime/abk_code.c" $<TARGET_OBJECTS:nfs_guest>)
 target_include_directories(nfsmw_android SYSTEM PRIVATE "${DXVK_SOURCE}/include/native"
   "${DXVK_SOURCE}/include/native/windows" "${DXVK_SOURCE}/include/native/directx")
-target_include_directories(nfsmw_android PRIVATE "${PCRECOMP}/runtime/recomp32" "${PCRECOMP}/runtime/win32hle" "${NFS_ROOT}/src/runtime")
+target_include_directories(nfsmw_android PRIVATE "${PCRECOMP}/runtime/recomp32" "${PCRECOMP}/runtime/win32hle" "${NFS_ROOT}/src/runtime" "${NFSU2_ROOT}/src/runtime")
 target_compile_definitions(nfsmw_android PRIVATE RECOMP_STRICT_ICALL RECOMP_X87_WINDOW)
 if(SERVER_GEN_SOURCES)
     target_compile_definitions(nfsmw_android PRIVATE NFS_SERVER_DLL)

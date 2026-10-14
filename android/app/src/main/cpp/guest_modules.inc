@@ -7,10 +7,14 @@
 // mapped here at that same base: the original file from the game folder, with
 // its base relocations applied for that base. The layout check below ties the
 // file to the generated code.
-struct GuestModuleSpec {const char* name;uint32_t base,preferredBase,imageSize;};
+struct GuestModuleSpec {const char* name;uint32_t base,preferredBase,imageSize;bool lifted;};
 constexpr GuestModuleSpec guestModuleSpecs[]={
-    {"server.dll",0x00a00000u,0x10000000u,0x58000u},  // between Speed.exe (ends 0x932000) and the first heap arena
+    // d3dx9_26.dll (DirectX runtime, the player's local copy): speed.exe imports
+    // its effect and math functions; lifted at 0x00B00000, after speed.exe
+    // (ends 0xA79000) and before the first heap arena.
+    {"d3dx9_26.dll",0x00b00000u,0x00400000u,0x24a000u,true},
 };
+bool isLiftedModuleName(const std::string& dll){for(auto& s:guestModuleSpecs)if(dll==s.name)return s.lifted;return false;}
 struct GuestModule {
     const GuestModuleSpec* spec;uint32_t entry=0,references=0;
     std::map<std::string,uint32_t> exports;  // name or "#ordinal" -> VA
@@ -50,10 +54,7 @@ uint32_t loadGuestModule(const std::string& name){
     const GuestModuleSpec* spec=nullptr;
     for(auto& candidate:guestModuleSpecs)if(name==candidate.name)spec=&candidate;
     if(!spec)return 0;
-#ifndef NFS_SERVER_DLL
-    NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","%s: this build has no lifted code for it",name.c_str());
-    return 0;
-#endif
+    if(!spec->lifted){NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","%s: this build has no lifted code for it",name.c_str());return 0;}
     std::ifstream stream(gamePath(std::string("C:\\nfsmw\\")+name),std::ios::binary);
     if(!stream){NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","%s is missing from the game folder",name.c_str());return 0;}
     std::vector<unsigned char> file((std::istreambuf_iterator<char>(stream)),{});
@@ -111,4 +112,16 @@ bool freeGuestModule(uint32_t handle){
     NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","%s unloaded",module->spec->name);
     guestModules.erase(handle);
     return true;
+}
+
+// speed.exe's imports of lifted DLLs, recorded by bindImports: map each DLL
+// (DllMain runs here, on the prepared guest machine) and store the export VAs.
+void bindDeferredModuleImports(){
+    for(auto& item:deferredModuleImports){
+        uint32_t handle=loadGuestModule(item.dll),va=0;
+        if(!handle)throw GuestStop(item.dll+" is required: copy it into the nfsmw folder (DirectX runtime, from Windows/SysWOW64)");
+        if(!guestModuleExport(handle,item.name,va))throw GuestStop(item.dll+" has no export "+item.name);
+        write32(item.slot,va);
+    }
+    if(!deferredModuleImports.empty())NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Bound %zu imports to lifted DLLs",deferredModuleImports.size());
 }
