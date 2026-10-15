@@ -124,3 +124,116 @@ preserve the surviving auto-reset signal, and maintain the five-argument
 Full remote-race completion and physical ARMv7 testing remain separate checks.
 
 API reference: [Microsoft WSAWaitForMultipleEvents](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsawaitformultipleevents).
+
+
+### Follow-up: peer connection remains under investigation
+
+The user confirmed that the two phones no longer show the previous error,
+but both wait for players to connect. This is not proof of a working online
+race, and v0.1.3 release notes explicitly preserve that limitation.
+
+A separate defect was found: NetBIOS NCBASTAT synthesized its MAC by hashing
+hostGameRoot. Both phones use /storage/emulated/0/nfsmw, so both received the
+same machine identity. Game code at 0x0083CBF0 invokes NetBIOS to read the
+adapter status during network initialization; the device logs confirm those
+calls. This collision is real, but it has not been established as the only
+cause of the stalled peer connection.
+
+The Android activity now supplies a random installation ID from private
+SharedPreferences before NativeActivity starts its native thread. It survives
+updates and switching APK ABI; app backup is disabled. The runtime exposes
+its lower 46 random bits as a locally administered unicast MAC. It does not
+read the hardware MAC or a platform device identifier. UDP overlapped receives
+now contribute to the existing per-peer diagnostics, including the first
+received packet and periodic byte/packet counts; payloads are not logged.
+
+The actual NetBIOS HLE regression passed on Redmi Note 8: repeated adapter
+status reads, the local/unicast bits, 60-byte status length, zero-filled tail,
+surrounding buffer guards and guest ABI. The persisted installation identity
+was checked to differ from the old shared path identity. ARM64 builds and the
+new event-close regression also passed. This candidate was installed on the
+Redmi; the S25 was disconnected by then. Repeat peer connection remains
+pending. These follow-up changes are not part of the v0.1.3 release tag.
+
+The first instrumented Redmi session received UDP from the S25 at the LAN
+address on ports 3658 (8-byte datagrams) and 9999 (384-byte discovery packets).
+At 17:48:05 a wait observed a closed event, returned ERROR_INVALID_HANDLE,
+and subsequent frames continued without the previous integration boundary.
+This demonstrates receive delivery and controlled teardown, not a completed
+peer handshake or race. The ARMv7 candidate also compiled successfully.
+
+
+### LAN server integration and two-phone validation
+
+The previous APK had no generated server.dll translation and no server.dll
+entry in guestModuleSpecs. LoadLibrary returned zero, so creating a LAN
+server silently failed. Underground 1 and 2 both include their own lifted
+server.dll at 0x00A00000; Most Wanted requires a different image and base.
+Its DLL is now translated at 0x00E00000 (preferred base 0x10000000, image size
+0x6F000), after speed.exe and d3dx9_26.dll and below both ABI heap arenas.
+
+scripts/prepare_server.py reproduces the relocation, seed collection,
+catalog and prefixed lift from a locally owned DLL. The catalog/lift has
+1770 functions and zero lift failures; ten unsupported instructions remain
+in discovered paths, so this is not a claim of complete instruction coverage.
+CMake now fails if the server translation is absent instead of producing an
+APK that cannot host LAN. The module uses the existing validated DLL loader,
+relocations, import binding, DllMain and export calls.
+
+The first S25 host test executed the real DLL and exposed Winsock ordinal
+151, __WSAFDIsSet. This helper is now implemented for the Windows fd_set
+layout and opaque guest SOCKET handles, and tested through the actual HLE
+ABI for first/middle/last hits, misses, empty sets and input preservation.
+All 35 Winsock imports used by server.dll have mappings. The Redmi also
+lacked server.dll/server.cfg; these were copied from the user's local game
+without changing the original files or saved profiles.
+
+With the corrected ARM64 build on both phones, the LAN server loaded, read
+server.cfg, listened at 192.168.88.164:9900 and accepted a client. Both phones
+reached the same grid with two players and a countdown; the user confirmed
+LAN worked. Captured gameplay traffic on UDP 3658 flowed in both directions
+at roughly 65-75 packets per five seconds per phone. This validates actual
+LAN gameplay, not just a visible lobby. A completed race was not recorded.
+
+Online remains separate: both devices advertise the same public IPv4/3658.
+One phone's peer channel timed out while the other kept receiving sequence/
+acknowledgment packets even after that channel had closed. This suggests a
+same-public-endpoint/NAT loop rather than proof of a completed peer link.
+Testing with distinct Internet connections is pending user authorization;
+mobile data is not enabled or switched automatically.
+
+The user subsequently reported a VPN on the S25. A fresh connectivity
+snapshot confirms Proton VPN, tun0, with the game UID inside its UID range
+and the local Wi-Fi subnet excluded from tunnel routes. Its connection
+timestamp is 18:08:58 local, after the captured peer attempt started at
+18:06. That attempt therefore cannot establish whether a newly created
+session works through the VPN. Keep the VPN enabled and restart both game
+processes before comparing new peer endpoints; do not attribute the
+remaining Online failure to the router or VPN without that test.
+
+Both v0.1.4 ABI builds including the server module compile successfully.
+The ARM64 candidate was installed on both phones for the fresh VPN test;
+the ARMv7 candidate has not yet been physically validated.
+
+### Online race reached with the Redmi hosting
+
+After restarting both games with the S25 VPN retained, the user created
+the Online session on the Redmi Note 8. Both phones reached the same race
+with two Golf cars and the two Online account handles on the scoreboard.
+Screenshots captured the race start and lap 1/3, with complementary first/
+second positions and the other player's car visible. This establishes
+actual Online gameplay for this configuration, beyond lobby discovery.
+
+At 18:13:49-56 local, the S25 sent 72-73 and received 82-87 peer packets per
+five-second reporting interval, while the Redmi sent 82-89 and received
+72-73. Peer traffic advanced from the eight-byte handshake into larger
+gameplay packets. No integration boundary error appeared in this attempt.
+The existing endpoint logs still showed the same public IPv4/3658 on both
+phones, so that tuple alone is insufficient evidence of a self-loop; the
+earlier NAT-loop interpretation remains an unproven hypothesis, not a
+confirmed cause. The test also changed host and restarted both processes,
+so it does not isolate the VPN as the cause of success. A completed race,
+S25-hosted Online session and chat delivery remain to be validated.
+
+The user subsequently confirmed Online was working and requested source
+publication on main plus both APK architectures as a GitHub release.

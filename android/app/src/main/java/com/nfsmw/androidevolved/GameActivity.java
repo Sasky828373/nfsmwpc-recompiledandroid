@@ -125,6 +125,7 @@ public final class GameActivity extends NativeActivity {
     private static native void nativeFrameLimit(int framesPerSecond);
     private static native void nativeWidescreen(boolean enabled);
     private static native void nativeOnlineServer(String host);
+    private static native void nativeNetworkIdentity(long identity);
     private static native void nativeGamepadConnected(boolean connected);
     private static native void nativeMinimapTop(boolean top);
     private static native void nativeBackBuffers(int count);
@@ -173,6 +174,16 @@ public final class GameActivity extends NativeActivity {
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
     }
     @Override protected void onCreate(Bundle saved) {
+        // NetBIOS supplies the PC game's machine identity. Keep a random ID
+        // private to this installation (backup is disabled), across upgrades
+        // and both APK architectures. The shared game path is not a device ID.
+        android.content.SharedPreferences network=getSharedPreferences("network_identity_v1",MODE_PRIVATE);
+        long identity=network.getLong("id",0);
+        if(identity==0){
+            do{identity=java.util.UUID.randomUUID().getLeastSignificantBits();}while(identity==0);
+            network.edit().putLong("id",identity).commit();
+        }
+        nativeNetworkIdentity(identity);
         super.onCreate(saved);
         inputManager=(android.hardware.input.InputManager)getSystemService(INPUT_SERVICE);
         tiltSensors=(android.hardware.SensorManager)getSystemService(SENSOR_SERVICE);

@@ -3,12 +3,12 @@
 
 ### Android downloads / Descargas Android
 
-[Most Wanted v0.1.3](https://github.com/codepdbh/nfsmwpc-recompiled/releases/tag/v0.1.3)
+[Most Wanted v0.1.4](https://github.com/codepdbh/nfsmwpc-recompiled/releases/tag/v0.1.4)
 
 | APK | Architecture |
 |---|---|
-| [ARM64 / 64 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.3/NFSMWPC-AndroidEvolved-v0.1.3-arm64.apk) | arm64-v8a, recommended |
-| [ARMv7 / 32 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.3/NFSMWPC-AndroidEvolved-v0.1.3-armeabi-v7a.apk) | armeabi-v7a; requires Android with 32-bit app support |
+| [ARM64 / 64 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.4/NFSMWPC-AndroidEvolved-v0.1.4-arm64.apk) | arm64-v8a, recommended |
+| [ARMv7 / 32 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.4/NFSMWPC-AndroidEvolved-v0.1.4-armeabi-v7a.apk) | armeabi-v7a; requires Android with 32-bit app support |
 
 Android 10+ and Vulkan 1.1+. Both APKs use the same package and signing key;
 install the architecture supported by your device. Original game data is required.
@@ -33,7 +33,7 @@ This is **not** an emulator and **not** a port of the Xbox 360 version: every fu
 | MW-M4/M5 CRT, memory, original entry point | ✅ |
 | MW-M6/M7 Win32, Direct3D 9, first frame | ✅ D3DX effects loaded from the game's own resources |
 | MW-M8/M9 Intro, menus, world | 🔧 3D world with traffic renders (≈1,450 draws/frame), 75 s+ without crashes; menus and input in progress |
-| MW-M10+ Racing, police, saving | User-confirmed playable racing; stability and online races under validation |
+| MW-M10+ Racing, police, saving | User-confirmed playable racing; two-phone LAN and Online gameplay validated, further stability testing ongoing |
 | Android ARM64 / ARMv7 APKs | Builds and runs: cinematics, menu input and user-confirmed gameplay; race quality/control validation ongoing |
 
 Android runtime fixes and current verification limits: [bring-up notes](docs/ANDROID_BRINGUP.md).
@@ -63,6 +63,22 @@ python scripts/run_lift.py lift work/speed.analysis.exe work/catalog.json src/re
 powershell -File scripts/build_windows.ps1
 powershell -File scripts/test_windows.ps1   # windowed test run
 ```
+
+### Android LAN server module
+
+Before building the Android APK, prepare the LAN server from your own PC copy:
+
+```powershell
+python scripts/prepare_server.py "../Need for Speed Most Wanted 2005/server.dll"
+```
+
+Keep `server.dll` and `server.cfg` from that copy in the phone's `nfsmw` folder.
+The original files and generated translations are excluded from Git. Android
+builds require the generated server module so LAN hosting cannot be silently
+omitted. LAN and Online races reached gameplay on an S25 Ultra and a Redmi
+Note 8 using ARM64 APKs. Online was confirmed with the Redmi hosting and
+a VPN active on the S25; other network configurations and chat delivery
+remain under validation. The ARMv7 build has not yet been tested on a device.
 
 ### License and credits
 

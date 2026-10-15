@@ -44,10 +44,13 @@ foreach(source IN LISTS GEN_SOURCES)
     endif()
 endforeach()
 # server.dll (EA's LAN game server) lifted from a copy relocated to its guest
-# base: scripts/prepare_module.py + run_lift.py --prefix server_. Optional: a
-# build without it reports LAN hosting as unavailable instead of failing.
+# base: scripts/prepare_module.py + run_lift.py --prefix server_. LAN hosting
+# requires it; do not silently produce an APK with a missing server module.
 set(SERVER_GEN_DIR "${NFS_ROOT}/src/recomp/gen_server")
 file(GLOB SERVER_GEN_SOURCES CONFIGURE_DEPENDS "${SERVER_GEN_DIR}/server_recomp_*.c")
+if(NOT SERVER_GEN_SOURCES)
+    message(FATAL_ERROR "Missing LAN server code: run scripts/prepare_server.py with your server.dll")
+endif()
 list(APPEND ANDROID_GEN_SOURCES ${SERVER_GEN_SOURCES})
 # x86 routines of EA's sound banks, lifted from the local Sound/**.abk
 # (scripts/abk_module.py + run_lift.py --prefix abk_; see src/runtime/nfs_abk.h).

@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 
 std::string onlineServer="eahub.eu";
+std::array<uint8_t,6> guestNetworkMac{0x02,0x4e,0,0,0,1};
 namespace net {
 constexpr uint32_t socketError=0xffffffffu,invalidSocket=0xffffffffu;
 constexpr uint32_t wsaEinval=10022,wsaEwouldblock=10035,wsaEnotsock=10038,wsaEfault=10014,wsaEmsgsize=10040,
@@ -406,6 +407,14 @@ void socketGetOption(){
 void hostToNetLong(){ret(__builtin_bswap32(arg(0)),1);}
 void hostToNetShort(){ret(__builtin_bswap16(uint16_t(arg(0))),1);}
 // select over Windows fd_set {u_int count; SOCKET array[64]}.
+void socketFdIsSet(){
+    uint32_t handle=arg(0),set=arg(1);
+    if(!set){ret(0,2);return;}
+    uint32_t count=read32(set);
+    if(count>64){ret(0,2);return;}
+    for(uint32_t i=0;i<count;++i)if(read32(set+4+i*4)==handle){ret(1,2);return;}
+    ret(0,2);
+}
 void socketSelect(){
     uint32_t sets[3]={arg(1),arg(2),arg(3)},timeoutPointer=arg(4);
     static constexpr short wanted[3]={POLLIN,POLLOUT,POLLPRI};
@@ -557,9 +566,7 @@ void netbios(){
     case 0x32:break;  // NCBRESET
     case 0x33:{  // NCBASTAT: ADAPTER_STATUS starts with the 6-byte address
         if(!buffer||length<6){status=1;break;}
-        uint32_t seed=0x811c9dc5u;for(char c:hostGameRoot)seed=(seed^uint8_t(c))*0x01000193u;
-        uint8_t mac[6]={0x02,0x4e,uint8_t(seed),uint8_t(seed>>8),uint8_t(seed>>16),uint8_t(seed>>24)};
-        std::memset(ptr(buffer,length),0,length);std::memcpy(ptr(buffer,6),mac,6);
+        std::memset(ptr(buffer,length),0,length);std::memcpy(ptr(buffer,6),guestNetworkMac.data(),6);
         uint16_t written=std::min<uint16_t>(length,60);std::memcpy(block+8,&written,2);break;
     }
     default:throw GuestStop("Netbios comando pendiente: "+hex(command)+" desde "+hex(g_cur_func));
@@ -578,7 +585,7 @@ const std::map<std::string,recomp_func_t> networkFunctions={
     {"getsockopt",socketGetOption},{"htonl",hostToNetLong},{"htons",hostToNetShort},{"ntohl",hostToNetLong},{"ntohs",hostToNetShort},
     {"#10",socketIoctl},{"#13",socketListen},{"#16",socketRecv},{"#17",socketRecvFrom},{"#18",socketSelect},{"#19",socketSend},
     {"#20",socketSendTo},{"#21",socketOption},{"#22",socketShutdown},{"#23",socketCreate},{"#52",hostByName},{"#57",hostName},
-    {"#111",wsaGetLastError},{"#112",wsaSetLastError},{"#115",wsaStartup},{"#116",wsaCleanup},{"WSAIoctl",wsaIoctl},
+    {"#111",wsaGetLastError},{"#112",wsaSetLastError},{"#115",wsaStartup},{"#116",wsaCleanup},{"#151",socketFdIsSet},{"__WSAFDIsSet",socketFdIsSet},{"WSAIoctl",wsaIoctl},
     {"accept",socketAccept},{"bind",socketBind},{"closesocket",socketClose},{"connect",socketConnect},{"getpeername",socketPeerName},
     {"getsockname",socketLocalName},{"ioctlsocket",socketIoctl},{"listen",socketListen},{"recv",socketRecv},{"recvfrom",socketRecvFrom},
     {"select",socketSelect},{"send",socketSend},{"sendto",socketSendTo},{"setsockopt",socketOption},{"shutdown",socketShutdown},

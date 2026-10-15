@@ -9,6 +9,13 @@
 // file to the generated code.
 struct GuestModuleSpec {const char* name;uint32_t base,preferredBase,imageSize;bool lifted;};
 constexpr GuestModuleSpec guestModuleSpecs[]={
+    // Most Wanted's LAN server. The old Underground address 0x00A00000
+    // overlaps speed.exe; 0x00E00000 is after D3DX and below both ABI heaps.
+#ifdef NFS_SERVER_DLL
+    {"server.dll",0x00e00000u,0x10000000u,0x6f000u,true},
+#else
+    {"server.dll",0x00e00000u,0x10000000u,0x6f000u,false},
+#endif
     // d3dx9_26.dll (DirectX runtime, the player's local copy): speed.exe imports
     // its effect and math functions; lifted at 0x00B00000, after speed.exe
     // (ends 0xA79000) and before the first heap arena.

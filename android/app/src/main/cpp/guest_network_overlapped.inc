@@ -22,11 +22,16 @@ bool receive(Receive& op,uint32_t& bytes,uint32_t& flags,uint32_t& error){
     for(auto item:op.buffers)buffers.push_back({item.second?ptr(item.first,item.second):nullptr,item.second});
     sockaddr_storage peer{};msghdr message{};
     message.msg_iov=buffers.data();message.msg_iovlen=buffers.size();
-    if(op.address){message.msg_name=&peer;message.msg_namelen=sizeof peer;}
+    message.msg_name=&peer;message.msg_namelen=sizeof peer;
     int nativeFlags=int(op.flags&3);if(op.flags&8)nativeFlags|=MSG_WAITALL;
     ssize_t received=::recvmsg(socket->fd,&message,nativeFlags);
     if(received<0){if(errno==EAGAIN||errno==EWOULDBLOCK)return false;error=wsaError(errno);return true;}
     bytes=uint32_t(received);flags=message.msg_flags&MSG_OOB?1u:0u;
+    if(peer.ss_family==AF_INET){
+        auto address=describe(peer);
+        notePeer(*socket,"recibe (overlapped) de",address,received);
+        count(op.socket,*socket,address,false,received);
+    }
     if(message.msg_flags&MSG_TRUNC){flags|=0x8000u;error=wsaEmsgsize;}
     if(op.address&&!storeAddress(op.address,op.addressSize,peer,std::min<socklen_t>(message.msg_namelen,16)))error=wsaEfault;
     return true;
@@ -116,6 +121,30 @@ void testGuestNetwork(){
     };
     auto require=[](bool ok){if(!ok)throw GuestStop("Winsock overlapped receive regression failed");};
     try{
+        // Windows FD_ISSET searches opaque SOCKET handles, not Linux fd bits.
+        write32(data,0);require(invoke(socketFdIsSet,{0x12345678,data})==0);
+        write32(data,3);write32(data+4,0x12345678);write32(data+8,0x87654321);write32(data+12,0xf0000010);
+        for(uint32_t value:{0x12345678u,0x87654321u,0xf0000010u})require(invoke(socketFdIsSet,{value,data})==1);
+        require(invoke(socketFdIsSet,{42,data})==0&&invoke(socketFdIsSet,{42,0})==0);
+        require(read32(data)==3&&read32(data+12)==0xf0000010);
+        // Exercise the actual NetBIOS guest ABI and its adapter-status layout.
+        // Repeated calls must return this installation's same unicast MAC,
+        // without overwriting the status buffer's surrounding guard bytes.
+        std::memset(ptr(data+256,64),0,64);
+        *static_cast<uint8_t*>(ptr(data+256,1))=0x33;
+        write32(data+260,data+320);uint16_t statusSize=64;
+        std::memcpy(ptr(data+264,2),&statusSize,2);
+        for(unsigned repeat=0;repeat<2;++repeat){
+            std::memset(ptr(data+320,68),0xc3,68);
+            require(invoke(netbios,{data+256})==0);
+            require(!std::memcmp(ptr(data+320,6),guestNetworkMac.data(),6));
+            require((guestNetworkMac[0]&3u)==2u&&read32(data+384)==0xc3c3c3c3u);
+            require(*static_cast<uint8_t*>(ptr(data+257,1))==0&&*static_cast<uint8_t*>(ptr(data+305,1))==0);
+            uint16_t written=0;std::memcpy(&written,ptr(data+264,2),2);require(written==60);
+            for(unsigned i=6;i<64;++i)require(*static_cast<uint8_t*>(ptr(data+320+i,1))==0);
+            std::memcpy(ptr(data+264,2),&statusSize,2);
+        }
+        NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","NetBIOS identity passed: stable local unicast address, status layout, buffer guards and guest ABI");
         receiver=::socket(AF_INET,SOCK_DGRAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);
         sender=::socket(AF_INET,SOCK_DGRAM|SOCK_CLOEXEC,0);require(receiver>=0&&sender>=0);
         sockaddr_in address{};address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
