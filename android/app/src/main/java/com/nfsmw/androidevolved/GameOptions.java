@@ -25,9 +25,9 @@ final class GameOptions {
 
     static final Option[] ALL = {
             new Option(RESOLUTION, "Resolución interna", "75",
-                    new String[] {"100", "75", "50", "720"},
+                    new String[] {"100", "75", "50", "720", "480", "360"},
                     new String[] {"Nativa · máxima calidad", "75% · equilibrada", "50% · máximo rendimiento",
-                            "720p · adaptada a la pantalla"}),
+                            "720p · adaptada a la pantalla", "480p · rendimiento", "360p · máximo rendimiento"}),
             new Option(FPS, "Límite de FPS", "120",
                     new String[] {"30", "60", "90", "120", "0"},
                     new String[] {"30 FPS · ahorra batería", "60 FPS", "90 FPS", "120 FPS", "Sin límite"}),
@@ -89,7 +89,10 @@ final class GameOptions {
     /** Render size for the selected resolution on a display of width × height (landscape). */
     static int[] renderSize(Context context, int width, int height) {
         String value = get(context, RESOLUTION);
-        if (value.equals("720")) return new int[] {Math.round((width * 720f / height) / 2f) * 2, 720};
+        if (value.equals("720") || value.equals("480") || value.equals("360")) {
+            int renderHeight = Integer.parseInt(value);
+            return new int[] {Math.round((width * (float) renderHeight / height) / 2f) * 2, renderHeight};
+        }
         float scale = Integer.parseInt(value) / 100f;
         return new int[] {Math.round(width * scale / 2f) * 2, Math.round(height * scale / 2f) * 2};
     }

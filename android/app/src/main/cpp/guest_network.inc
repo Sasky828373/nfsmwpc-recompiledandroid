@@ -50,7 +50,7 @@ template<class F> auto released(F f){
     if(!machineLease||!machineLease->owns_lock())throw GuestStop("Guest scheduler ownership missing");
     State saved;saved.save();machineLease->unlock();
     auto result=f();int error=errno;
-    machineLease->lock();saved.load();errno=error;
+    machineLease->lock();saved.load();errno=error;checkGuestThreadCancellation();
     return result;
 }
 Socket* find(uint32_t handle){auto found=sockets.find(handle);return found==sockets.end()?nullptr:&found->second;}

@@ -485,7 +485,7 @@ const std::map<std::string,recomp_func_t> kernelFunctions={
     {"LoadLibraryA",loadLibrary},{"FreeLibrary",freeLibrary},
     {"SetErrorMode",setErrorMode},
     {"CreateEventA",createEvent},{"SetEvent",setEvent},{"ResetEvent",resetEvent},
-    {"CreateThread",createThread},{"ResumeThread",resumeThread},{"GetExitCodeThread",threadExitCode},{"WaitForSingleObject",waitThread},{"WaitForMultipleObjects",waitMultiple},{"ExitThread",exitThread},
+    {"CreateThread",createThread},{"ResumeThread",resumeThread},{"GetExitCodeThread",threadExitCode},{"WaitForSingleObject",waitThread},{"WaitForMultipleObjects",waitMultiple},{"ExitThread",exitThread},{"TerminateThread",terminateThread},
     {"InterlockedExchange",interlockedExchange},{"InterlockedIncrement",interlockedIncrement},{"InterlockedDecrement",interlockedDecrement},{"InterlockedCompareExchange",interlockedCompareExchange},{"SetThreadPriority",setThreadPriority},
     {"CreateToolhelp32Snapshot",toolhelpSnapshot},{"Module32First",moduleFirst},{"Module32Next",moduleNext},{"CloseHandle",closeHandle},
     {"Process32First",processFirst},{"Process32Next",processNext},

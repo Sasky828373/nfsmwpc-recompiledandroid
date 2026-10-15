@@ -208,15 +208,18 @@ void startStallWatch(){
         }
     }).detach();});
 }
-void yieldGuestMachine(unsigned milliseconds=0) {
+void checkGuestThreadCancellation();
+void yieldGuestMachine(unsigned milliseconds=0,std::chrono::steady_clock::time_point deadline={}) {
     if(!machineLease||!machineLease->owns_lock())throw GuestStop("Guest scheduler ownership missing");
     {auto& trace=currentTrace();trace.func=g_cur_func;trace.esp=g_esp;}
     State saved;saved.save();machineLease->unlock();
-    if(milliseconds)std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));else std::this_thread::yield();
-    machineLease->lock();saved.load();
+    if(deadline!=std::chrono::steady_clock::time_point{})std::this_thread::sleep_until(deadline);
+    else if(milliseconds)std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));else std::this_thread::yield();
+    machineLease->lock();saved.load();checkGuestThreadCancellation();
 }
 void pollGuestNetwork();
 void checkGuestProgress() {
+    checkGuestThreadCancellation();
     while(guestPaused.load()&&!stopRequested.load())yieldGuestMachine(20);
     if(stopRequested.load())throw GuestStop("Guest execution cancelled");
     // Imports and lifted back edges can reach this hook many times per frame.
@@ -302,6 +305,7 @@ void getProcAddress();
 uint32_t d3dToken{};
 void direct3DCreate(){ret(createGuestD3D9(arg(0)),1);}
 void freeD3DGuest(uint32_t address){heaps->free(GuestHeaps::process,address);}
+void serviceGuestSound();
 void d3dDispatch(){uint32_t args[32];std::memcpy(args,ptr(g_esp+4,sizeof args),sizeof args);uint32_t count=0;uint32_t token=d3dToken;
     static uint64_t bridgeCalls=0;static std::chrono::nanoseconds bridgeTime{},presentTime{};
     // Time one call in 64 (and every Present) so the statistic does not cost
@@ -319,9 +323,11 @@ void d3dDispatch(){uint32_t args[32];std::memcpy(args,ptr(g_esp+4,sizeof args),s
         if(cap!=appliedLimit||now>nextFrame+std::chrono::milliseconds(200)){
             appliedLimit=cap;nextFrame=now;
         }
-        if(cap){nextFrame+=std::chrono::nanoseconds(1000000000ull/cap);if(nextFrame>now)std::this_thread::sleep_until(nextFrame);}
+        // Present has returned: let audio/streaming/network guest workers run
+        // during the frame limiter's idle time, preserving this thread's state.
+        if(cap){nextFrame+=std::chrono::nanoseconds(1000000000ull/cap);if(nextFrame>now)yieldGuestMachine(0,nextFrame);}
         static unsigned frames=0;static auto since=std::chrono::steady_clock::now();
-        if(++frames==120){auto now=std::chrono::steady_clock::now();double seconds=std::chrono::duration<double>(now-since).count();
+        if(++frames==120){serviceGuestSound();auto now=std::chrono::steady_clock::now();double seconds=std::chrono::duration<double>(now-since).count();
             NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Guest D3D9 presentation %.1f FPS over %.2f seconds; bridge ~%.2f ms/frame (present %.2f), %.0f calls/frame",
                 frames/seconds,seconds,double(bridgeTime.count())/1e6/frames,double(presentTime.count())/1e6/frames,double(bridgeCalls)/frames);
             frames=0;since=now;bridgeTime=presentTime=std::chrono::nanoseconds{};bridgeCalls=0;}
@@ -336,6 +342,50 @@ uint32_t callGuest(uint32_t va,const std::vector<uint32_t>& args,uint32_t cleanu
 #include "guest_audio.inc"
 #include "guest_network.inc"
 #include "guest_msvcrt.inc"
+uint32_t terminationTestEvent=0,terminationTestWait=0,terminationTestTerminate=0;
+std::set<uint32_t> terminationTestEntered;
+void terminationTestEntry(){
+    uint32_t mode=arg(0);terminationTestEntered.insert(mode);
+    if(mode==2){callGuest(terminationTestTerminate,{0xfffffffeu,93});throw GuestStop("Self termination returned");}
+    if(mode==0)callGuest(terminationTestWait,{terminationTestEvent,UINT32_MAX});
+    for(;;){checkGuestProgress();yieldGuestMachine(1);}
+}
+void testGuestThreadTermination(){
+    State saved;saved.save();uint32_t savedError=lastError;
+    auto imported=[](const char* name){for(uint32_t i=0;i<imports.size();++i)if(imports[i].name==std::string("kernel32.dll!")+name)return importBase+i*16;return 0u;};
+    uint32_t create=imported("CreateThread"),terminate=imported("TerminateThread"),wait=imported("WaitForSingleObject"),code=imported("GetExitCodeThread"),close=imported("CloseHandle");
+    if(!create||!terminate||!wait||!code||!close)throw GuestStop("Thread termination test imports missing");
+    uint32_t data=allocate(16),event=nextEventHandle++;
+    eventHandles.emplace(event,std::make_shared<GuestEvent>(GuestEvent{true,false}));
+    terminationTestEvent=event;terminationTestWait=wait;terminationTestTerminate=terminate;terminationTestEntered.clear();
+    size_t importCount=imports.size();uint32_t start=importBase+uint32_t(importCount)*16;
+    imports.push_back({"selfcheck!termination",terminationTestEntry});std::vector<uint32_t> handles;
+    auto require=[](bool ok){if(!ok)throw GuestStop("Thread termination regression failed");};
+    auto finished=[&](uint32_t handle,uint32_t expected){
+        require(callGuest(wait,{handle,2000})==0);
+        require(callGuest(code,{handle,data})==1&&read32(data)==expected);
+    };
+    try{
+        require(callGuest(terminate,{0x12345678,1})==0&&lastError==6);
+        for(uint32_t mode:{0u,1u,3u}){
+            uint32_t handle=callGuest(create,{0,0,start,mode,mode==3?4u:0u,0});require(handle!=0);handles.push_back(handle);
+            if(mode!=3){auto until=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+                while(!terminationTestEntered.count(mode)){require(std::chrono::steady_clock::now()<until);yieldGuestMachine(1);}}
+            require(callGuest(wait,{handle,0})==258);
+            require(callGuest(terminate,{handle,40+mode})==1);finished(handle,40+mode);
+            require(callGuest(terminate,{handle,999})==1);finished(handle,40+mode);
+            if(mode==3)require(!terminationTestEntered.count(mode));
+        }
+        uint32_t self=callGuest(create,{0,0,start,2,0,0});require(self!=0);handles.push_back(self);finished(self,93);
+        for(uint32_t handle:handles)require(callGuest(close,{handle})==1);
+        handles.clear();reapGuestThreads();imports.resize(importCount);eventHandles.erase(event);
+        heaps->free(GuestHeaps::process,data);saved.load();lastError=savedError;
+        NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Thread termination passed: blocked, running, suspended, self, completed, exit codes, waits and ABI");
+    }catch(...){
+        for(uint32_t handle:handles){auto t=threadHandles.find(handle);if(t!=threadHandles.end()){t->second->terminateRequested=true;t->second->terminateCode=1;}}
+        throw;
+    }
+}
 void testGuestScheduling(){
     State original;original.save();uint32_t savedError=lastError,savedTLS=tlsValues[1087];
     g_eax=0x11223344;g_fs_base=0x21000000;g_st[0]=123.5;g_xmm[7].u64[0]=0x123456789abcdef0ull;
@@ -351,7 +401,7 @@ void testGuestScheduling(){
         catch(const std::exception& error){failure=error.what();}
         forgetThreadTrace();done=true;machineLease=nullptr;
     });
-    try{while(!done){checkGuestProgress();yieldGuestMachine();
+    try{while(!done){checkGuestProgress();yieldGuestMachine(0,std::chrono::steady_clock::now()+std::chrono::milliseconds(1));
         if(g_eax!=0x11223344||g_fs_base!=0x21000000||g_st[0]!=123.5||g_xmm[7].u64[0]!=0x123456789abcdef0ull||lastError!=111||tlsValues[1087]!=0x55)
             failure="Main guest context was not preserved during handover";
     }}catch(const std::exception& error){failure=error.what();}
@@ -709,6 +759,7 @@ std::string connectGuestRuntime(const char* executable) {
         testGuestCriticalSections();
         testGuestQsort();
         testGuestNetwork();
+        testGuestThreadTermination();
         // Restore a clean CPU state before executing the real CRT entry.
         fresh.load();
         bindDeferredModuleImports();

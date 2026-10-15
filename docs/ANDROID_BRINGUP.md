@@ -64,3 +64,29 @@ race remain to be tested. The game was left paused after the test.
 
 No game files, generated translations or logs are included in source control.
 Release APKs are published separately as GitHub release assets.
+
+
+## Redmi Note 8 follow-up (2026-10-15)
+
+Leaving Online reached speed.exe 0x7EC268, which calls the previously missing
+kernel32!TerminateThread. The Android HLE now requests cooperative thread
+termination, unwinds at scheduler/network-wait checkpoints, preserves the
+requested exit code and signals thread completion through existing waits.
+It does not forcibly cancel the host pthread. The device startup regression
+passed blocked, running, suspended, self, already-completed, invalid-handle,
+exit-code and guest ABI checks. The user confirmed that exiting Online works.
+This confirmation does not establish that an Internet race is functional.
+
+The launcher adds aspect-preserving 480p and 360p presets. On the Redmi's
+2340x1080 display these render at 1040x480 and 780x360. The previous default
+was 1756x810 (75%), independently of the game's low detail settings. Captured
+3D menu samples at that default were about 13-16 FPS, with Present taking
+34-53 ms. At 780x360, menu samples reached about 40-46 FPS; gameplay samples
+varied around 17-39 FPS depending on the scene, with Present near 1 ms.
+These are observed presentation rates across different scenes, not a controlled
+race benchmark or a guarantee of sustained performance. CPU-side guest work
+and render submission remain limiting factors after reducing GPU pixel load.
+
+See [Audio and frame pacing follow-up](AUDIO_FRAME_PACING.md) for the subsequent
+shared audio changes and outstanding device testing. The last audio revision
+was compiled for review; it has not yet been validated on tester hardware.

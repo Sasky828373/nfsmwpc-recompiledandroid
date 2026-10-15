@@ -5,6 +5,7 @@ struct GuestThread {
     int32_t priority=0;
     bool started=false,done=false;
     bool timer=false;
+    bool terminateRequested=false;uint32_t terminateCode=0;
 };
 struct GuestTimer {
     uint32_t id,delay,callback,parameter;bool periodic,cancelled=false,running=false,synchronous=false;
@@ -95,6 +96,23 @@ void resetEvent(){auto event=eventHandles.find(arg(0));if(event==eventHandles.en
 // ExitThread unwinds the lifted frames back to guestThreadEntry.
 struct GuestThreadExit{uint32_t code;};
 thread_local bool insideGuestThread=false;
+thread_local GuestThread* currentGuestThread=nullptr;
+void checkGuestThreadCancellation(){
+    if(currentGuestThread&&currentGuestThread->terminateRequested)
+        throw GuestThreadExit{currentGuestThread->terminateCode};
+}
+void terminateThread(){
+    auto found=threadHandles.find(arg(0));
+    auto* target=arg(0)==0xfffffffeu?currentGuestThread:found==threadHandles.end()?nullptr:found->second.get();
+    if(!target){lastError=6;ret(0,2);return;}
+    auto& thread=*target;
+    if(!thread.done&&!thread.terminateRequested){
+        thread.terminateCode=arg(1);thread.terminateRequested=true;
+        NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Terminating guest thread %u exit=%u",thread.id,thread.terminateCode);
+    }
+    checkGuestThreadCancellation(); // Self-termination never returns.
+    ret(1,2);
+}
 void exitThread(){
     if(!insideGuestThread)throw GuestStop("ExitThread en el hilo principal desde "+hex(g_cur_func));
     throw GuestThreadExit{arg(0)};
@@ -102,6 +120,7 @@ void exitThread(){
 void* guestThreadEntry(void* context){
     insideGuestThread=true;
     auto& thread=*static_cast<GuestThread*>(context);
+    currentGuestThread=&thread;
     std::unique_lock<MachineMutex> lease(machine);machineLease=&lease;guestThreadId=thread.id;
     State fresh;fresh.esp=thread.stack+(4u<<20)-64;fresh.fs=thread.tib;fresh.load();
     try {
@@ -118,7 +137,7 @@ void* guestThreadEntry(void* context){
     }catch(const std::exception& error){thread.exitCode=1;guestThreadFault=error.what();}
     heaps->free(GuestHeaps::process,thread.stack);heaps->free(GuestHeaps::process,thread.tib);
     for(auto& value:mutexHandles)if(value.second->owner==thread.id){value.second->owner=0;value.second->depth=0;value.second->abandoned=true;}
-    forgetThreadTrace();thread.done=true;machineLease=nullptr;return nullptr;
+    forgetThreadTrace();thread.done=true;currentGuestThread=nullptr;machineLease=nullptr;return nullptr;
 }
 void reapGuestThreads(){
     for(auto it=guestThreads.begin();it!=guestThreads.end();){
@@ -133,7 +152,7 @@ void createThread(){
     if(flags&~4u){lastError=87;ret(0,6);return;}
     auto thread=std::make_shared<GuestThread>();thread->id=nextThreadId++;thread->handle=nextThreadHandle++;
     thread->start=arg(2);thread->parameter=arg(3);thread->suspended=flags&4?1:0;
-    if(!recomp_lookup(thread->start)){lastError=87;ret(0,6);return;}
+    if(!recomp_lookup(thread->start)&&!recomp_lookup_manual(thread->start)&&!recomp_lookup_import(thread->start)){lastError=87;ret(0,6);return;}
     thread->stack=allocate(4u<<20);thread->tib=allocate(4096);
     write32(thread->tib,UINT32_MAX);write32(thread->tib+4,thread->stack+(4u<<20));write32(thread->tib+8,thread->stack);
     write32(thread->tib+0x18,thread->tib);write32(thread->tib+0x20,1);write32(thread->tib+0x24,thread->id);
