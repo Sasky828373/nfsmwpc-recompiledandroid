@@ -1,10 +1,24 @@
 # Need for Speed Most Wanted (2005, PC) — Recompiled
 
+
+### Android downloads / Descargas Android
+
+[Most Wanted v0.1.2](https://github.com/codepdbh/nfsmwpc-recompiled/releases/tag/v0.1.2)
+
+| APK | Architecture |
+|---|---|
+| [ARM64 / 64 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.2/NFSMWPC-AndroidEvolved-v0.1.2-arm64.apk) | arm64-v8a, recommended |
+| [ARMv7 / 32 bits](https://github.com/codepdbh/nfsmwpc-recompiled/releases/download/v0.1.2/NFSMWPC-AndroidEvolved-v0.1.2-armeabi-v7a.apk) | armeabi-v7a; requires Android with 32-bit app support |
+
+Android 10+ and Vulkan 1.1+. Both APKs use the same package and signing key;
+install the architecture supported by your device. Original game data is required.
+Audio, pacing and validation details: [runtime follow-up](docs/AUDIO_FRAME_PACING.md).
+
 **English** · [Español](#español)
 
-Static recompilation of the **PC version** of *Need for Speed: Most Wanted* (2005, `speed.exe`, x86) to native code, first as a Windows validation host and then for **Android ARM64**. The goal is the third game of the *NFS Android Evolved* family, after [Underground 2](https://github.com/codepdbh/nfsu2-recompiled) and [Underground 1](https://github.com/codepdbh/nfsu1-recompiled).
+Static recompilation of the **PC version** of *Need for Speed: Most Wanted* (2005, `speed.exe`, x86) to native code, first as a Windows validation host and then for **Android ARM64 and ARMv7**. The goal is the third game of the *NFS Android Evolved* family, after [Underground 2](https://github.com/codepdbh/nfsu2-recompiled) and [Underground 1](https://github.com/codepdbh/nfsu1-recompiled).
 
-This is **not** an emulator and **not** a port of the Xbox 360 version: every function of the original PC executable is translated ahead of time from x86 to C with [pcrecomp](https://github.com/sp00nznet/pcrecomp) (patched), then compiled by MSVC (Windows) or the Android NDK (ARM64).
+This is **not** an emulator and **not** a port of the Xbox 360 version: every function of the original PC executable is translated ahead of time from x86 to C with [pcrecomp](https://github.com/sp00nznet/pcrecomp) (patched), then compiled by MSVC (Windows) or the Android NDK (ARM64 / ARMv7).
 
 > No game files are included. You need your own copy of the PC game. Generated C code, analysis copies and logs are produced locally and are never committed.
 
@@ -20,7 +34,7 @@ This is **not** an emulator and **not** a port of the Xbox 360 version: every fu
 | MW-M6/M7 Win32, Direct3D 9, first frame | ✅ D3DX effects loaded from the game's own resources |
 | MW-M8/M9 Intro, menus, world | 🔧 3D world with traffic renders (≈1,450 draws/frame), 75 s+ without crashes; menus and input in progress |
 | MW-M10+ Racing, police, saving | User-confirmed playable racing; stability and online races under validation |
-| Android ARM64 APK | Builds and runs: cinematics, menu input and user-confirmed gameplay; race quality/control validation ongoing |
+| Android ARM64 / ARMv7 APKs | Builds and runs: cinematics, menu input and user-confirmed gameplay; race quality/control validation ongoing |
 
 Android runtime fixes and current verification limits: [bring-up notes](docs/ANDROID_BRINGUP.md).
 
@@ -58,7 +72,7 @@ Code in this repository: see each file. pcrecomp by sp00nznet. Proportional HUD 
 
 ## Español
 
-Recompilación estática de la **versión de PC** de *Need for Speed: Most Wanted* (2005, `speed.exe`, x86) a código nativo: primero un host de validación en Windows y después **Android ARM64**. Es el tercer juego de la familia *NFS Android Evolved*, después de [Underground 2](https://github.com/codepdbh/nfsu2-recompiled) y [Underground 1](https://github.com/codepdbh/nfsu1-recompiled).
+Recompilación estática de la **versión de PC** de *Need for Speed: Most Wanted* (2005, `speed.exe`, x86) a código nativo: primero un host de validación en Windows y después **Android ARM64 y ARMv7**. Es el tercer juego de la familia *NFS Android Evolved*, después de [Underground 2](https://github.com/codepdbh/nfsu2-recompiled) y [Underground 1](https://github.com/codepdbh/nfsu1-recompiled).
 
 **No** es un emulador ni un port de la versión de Xbox 360: cada función del ejecutable original de PC se traduce de antemano de x86 a C con [pcrecomp](https://github.com/sp00nznet/pcrecomp) (modificado) y después se compila con MSVC (Windows) o con el NDK de Android (ARM64).
 
@@ -76,7 +90,7 @@ Recompilación estática de la **versión de PC** de *Need for Speed: Most Wante
 | MW-M6/M7 Win32, Direct3D 9, primer frame | ✅ efectos D3DX cargados desde los recursos del propio juego |
 | MW-M8/M9 Intro, menús, mundo | 🔧 el mundo 3D con tráfico se dibuja (≈1.450 draws por frame), más de 75 s sin cierres; menús y controles en curso |
 | MW-M10+ Carreras, policía, guardado | ⏳ |
-| APK de Android ARM64 | Gameplay, imagen proporcional, acelerador y Esc confirmados en S25; estabilidad en pruebas |
+| APK de Android ARM64 / ARMv7 | Gameplay, imagen proporcional, acelerador y Esc confirmados en S25; estabilidad en pruebas |
 
 ### Compilación (Windows)
 

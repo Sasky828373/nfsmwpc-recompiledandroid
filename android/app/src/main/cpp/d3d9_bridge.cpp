@@ -32,6 +32,9 @@ enum class Kind:uint32_t {D3D9=1,Device=2,Texture=3,Cube=4,Surface=5,VertexBuffe
     VertexShader=8,PixelShader=9,Declaration=10,StateBlock=11,Query=12,SwapChain=13,VolumeTexture=14,Volume=15};
 struct Object {IUnknown* native;Kind kind;uint32_t references=1;CompressedView compressed;uint32_t parent=0;uint32_t children=0;};
 std::unordered_map<uint32_t,Object> objects;
+// Ordinary Device methods dominate a frame. Retain its validated handle so
+// setters/draws do not repeat the registry hash lookup. Never cache QI/refcounts.
+uint32_t hotDeviceAddress=0;IUnknown* hotDeviceNative=nullptr;
 std::map<IUnknown*,uint32_t> addresses;
 void* guestBase;
 uint32_t (*allocateGuest)(uint32_t);
@@ -70,6 +73,7 @@ template<class T>T* nativeObject(uint32_t address){
 }
 uint32_t wrapTexture(IDirect3DBaseTexture9* texture){if(!texture)return 0;switch(texture->GetType()){case D3DRTYPE_TEXTURE:return wrap(texture,Kind::Texture);case D3DRTYPE_CUBETEXTURE:return wrap(texture,Kind::Cube);case D3DRTYPE_VOLUMETEXTURE:return wrap(texture,Kind::VolumeTexture);default:throw std::runtime_error("Unknown D3D9 base texture type");}}
 void retireGuestObject(uint32_t address){
+    if(address==hotDeviceAddress){hotDeviceAddress=0;hotDeviceNative=nullptr;}
     auto found=objects.find(address);if(found==objects.end())return;
     uint32_t table;std::memcpy(&table,pointer(address),4);
     freeGuest(table);freeGuest(address);addresses.erase(found->second.native);objects.erase(found);
@@ -131,8 +135,9 @@ void setD3D9Compatibility(bool cpuTextures,unsigned backBuffers){
 void configureD3D9Bridge(void* base,uint32_t (*allocator)(uint32_t),void (*deallocator)(uint32_t)){
     guestBase=base;allocateGuest=allocator;freeGuest=deallocator;
 #ifdef __ANDROID__
-    // Shader caches are optional; the Android process has no writable cwd.
-    setenv("DXVK_STATE_CACHE","0",1);
+    // android_main provides a writable private cache before creating DXVK.
+    // Other bring-up callers can still run without a writable working directory.
+    if(!std::getenv("DXVK_STATE_CACHE_PATH"))setenv("DXVK_STATE_CACHE","0",1);
     setenv("DXVK_LOG_PATH","none",1);
 #endif
 #ifndef __ANDROID__
@@ -140,6 +145,7 @@ void configureD3D9Bridge(void* base,uint32_t (*allocator)(uint32_t),void (*deall
 #endif
 }
 void shutdownD3D9Bridge(){
+    hotDeviceAddress=0;hotDeviceNative=nullptr;
     for(auto& lock:resourceLocks)freeGuest(lock.second.guest);resourceLocks.clear();
     for(uint32_t kind=15;kind;--kind)for(auto it=objects.begin();it!=objects.end();){
         if(static_cast<uint32_t>(it->second.kind)!=kind){++it;continue;}
@@ -192,13 +198,18 @@ std::vector<D3DDISPLAYMODE> adapterModes(IDirect3D9* d3d,UINT adapter,D3DFORMAT 
 bool deviceResetPending=false;
 uint32_t dispatchGuestD3D9(uint32_t token,const uint32_t* args,uint32_t* argumentCount){
     uint32_t kind=(token-methodBase)/4096,method=((token-methodBase)%4096)/16;
-    auto found=objects.find(args[0]);
-    if(found==objects.end()||static_cast<uint32_t>(found->second.kind)!=kind){
-        NFS_RUNTIME_LOG(ANDROID_LOG_ERROR,"NFSMW","Invalid D3D9 COM call object=%08x token=%08x kind=%u method=%u actualKind=%u",args[0],token,kind,method,
-            found==objects.end()?0:static_cast<uint32_t>(found->second.kind));
-        throw std::runtime_error("Invalid guest D3D9 COM object");
+    auto found=objects.end();IUnknown* object=nullptr;
+    if(kind==2&&method>2&&args[0]==hotDeviceAddress&&hotDeviceNative)object=hotDeviceNative;
+    else{
+        found=objects.find(args[0]);
+        if(found==objects.end()||static_cast<uint32_t>(found->second.kind)!=kind){
+            NFS_RUNTIME_LOG(ANDROID_LOG_ERROR,"NFSMW","Invalid D3D9 COM call object=%08x token=%08x kind=%u method=%u actualKind=%u",args[0],token,kind,method,
+                found==objects.end()?0:static_cast<uint32_t>(found->second.kind));
+            throw std::runtime_error("Invalid guest D3D9 COM object");
+        }
+        object=found->second.native;
+        if(kind==2){hotDeviceAddress=args[0];hotDeviceNative=object;}
     }
-    auto object=found->second.native;
     // Android may replace ANativeWindow after backgrounding, even at the same
     // pointer address. Override the destination with this surface generation so
     // DXVK recreates its presenter while keeping the game's device/resources.

@@ -90,3 +90,6 @@ and render submission remain limiting factors after reducing GPU pixel load.
 See [Audio and frame pacing follow-up](AUDIO_FRAME_PACING.md) for the subsequent
 shared audio changes and outstanding device testing. The last audio revision
 was compiled for review; it has not yet been validated on tester hardware.
+
+
+The subsequent audio/frame-pacing release is documented in [AUDIO_FRAME_PACING.md](AUDIO_FRAME_PACING.md): ARM64 gameplay was exercised on the Redmi, both ABI APKs compile, and the final ARM64 releases install on the S25. Physical ARMv7 testing remains pending because only the ARM64-only S25 was connected at release time.
