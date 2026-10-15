@@ -147,9 +147,35 @@ void testGuestNetwork(){
         require(invoke(socketClose,{handle})==0);handle=0;
         require(read32(data+64)==995&&invoke(wsaWaitForMultipleEvents,{1,data,0,0,0})==0&&net::receives.empty());
         require(invoke(wsaCloseEvent,{event})==1);event=0;
+        // Reproduce a lobby disconnect: WSACloseEvent runs on another thread
+        // while WSAWaitForMultipleEvents is blocked with the machine released.
+        // A ready auto-reset event must not be consumed when another entry is
+        // invalid, regardless of its position or wait-any/wait-all mode.
+        for(uint32_t all:{0u,1u})for(bool closeFirst:{false,true}){
+            event=invoke(wsaCreateEvent,{});secondEvent=invoke(wsaCreateEvent,{});
+            auto survivor=eventHandles.find(closeFirst?secondEvent:event)->second;
+            survivor->manual=false;
+            write32(data,event);write32(data+4,secondEvent);
+            uint32_t closing=closeFirst?event:secondEvent,result=0,waitError=0;
+            bool closed=false;std::exception_ptr failure;
+            std::thread closer([&]{
+                std::unique_lock<MachineMutex> lease(machine);
+                try{closed=invoke(wsaCloseEvent,{closing})==1;survivor->signaled=true;}
+                catch(...){failure=std::current_exception();}
+            });
+            try{result=invoke(wsaWaitForMultipleEvents,{2,data,all,1000,0});waitError=lastError;}
+            catch(...){net::released([&]{closer.join();return 0;});throw;}
+            net::released([&]{closer.join();return 0;});
+            if(failure)std::rethrow_exception(failure);
+            require(closed&&result==UINT32_MAX&&waitError==6&&survivor->signaled);
+            if(closeFirst)event=0;else secondEvent=0;
+            uint32_t remaining=closeFirst?secondEvent:event;write32(data,remaining);
+            require(invoke(wsaWaitForMultipleEvents,{1,data,0,0,0})==0&&!survivor->signaled);
+            require(invoke(wsaCloseEvent,{remaining})==1);event=secondEvent=0;
+        }
         net::completedFlags.erase(data+64);
         ::close(sender);sender=-1;heaps->free(GuestHeaps::process,data);original.load();lastError=savedError;
-        NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Winsock events passed: timeout, signal/reset, pending UDP scatter receive, completion, cancellation and ABI stack");
+        NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Winsock events passed: timeout, signal/reset, pending UDP scatter receive, completion, cancellation, concurrent event close (any/all, first/last), signal preservation and ABI stack");
     }catch(...){
         if(handle){net::cancelReceives(handle);::close(net::sockets.at(handle).fd);net::sockets.erase(handle);}
         if(event)eventHandles.erase(event);if(secondEvent)eventHandles.erase(secondEvent);net::completedFlags.erase(data+64);

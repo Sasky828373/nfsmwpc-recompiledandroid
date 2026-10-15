@@ -197,11 +197,15 @@ void waitThread(){
     ret(0,2);
 }
 // WaitForMultipleObjects over the same thread, event and mutex objects as WaitForSingleObject.
-bool waitableReady(uint32_t handle){
-    if(auto mutex=mutexHandles.find(handle);mutex!=mutexHandles.end())return !mutex->second->owner||mutex->second->owner==guestThreadId;
-    if(auto semaphore=semaphoreHandles.find(handle);semaphore!=semaphoreHandles.end())return semaphore->second->count>0;
-    if(auto event=eventHandles.find(handle);event!=eventHandles.end()){pollWaitTimer(handle);return event->second->signaled;}
-    return threadHandles.at(handle)->done;
+enum class WaitableState { invalid,waiting,ready };
+WaitableState waitableState(uint32_t handle){
+    bool ready;
+    if(auto mutex=mutexHandles.find(handle);mutex!=mutexHandles.end())ready=!mutex->second->owner||mutex->second->owner==guestThreadId;
+    else if(auto semaphore=semaphoreHandles.find(handle);semaphore!=semaphoreHandles.end())ready=semaphore->second->count>0;
+    else if(auto event=eventHandles.find(handle);event!=eventHandles.end()){pollWaitTimer(handle);ready=event->second->signaled;}
+    else if(auto thread=threadHandles.find(handle);thread!=threadHandles.end())ready=thread->second->done;
+    else return WaitableState::invalid;
+    return ready?WaitableState::ready:WaitableState::waiting;
 }
 bool acquireWaitable(uint32_t handle){  // true when an abandoned mutex was taken
     if(auto mutex=mutexHandles.find(handle);mutex!=mutexHandles.end()){
@@ -217,18 +221,33 @@ void waitMultiple(){
     std::vector<uint32_t> handles(count);
     for(uint32_t i=0;i<count;++i){
         handles[i]=read32(list+i*4);
-        if(!mutexHandles.count(handles[i])&&!eventHandles.count(handles[i])&&!threadHandles.count(handles[i])&&!semaphoreHandles.count(handles[i])){lastError=6;ret(UINT32_MAX,4);return;}
+        if(waitableState(handles[i])==WaitableState::invalid){lastError=6;ret(UINT32_MAX,4);return;}
     }
     auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout);
     WaitScope scope(all?"WaitForMultipleObjects(all)":"WaitForMultipleObjects(any)",handles[0]);
     for(;;){
         pollGuestNetwork();
+        // Online teardown can close an event while this wait releases the
+        // machine. Validate every object again, including ones after a ready
+        // entry, before consuming any signal. Closing a handle during a wait
+        // is undefined on Windows; report WAIT_FAILED instead of stopping the
+        // entire game with std::map::at (or treating a missing event as a thread).
+        std::array<WaitableState,64> states;
+        bool ready=true;
+        for(uint32_t i=0;i<count;++i){
+            states[i]=waitableState(handles[i]);
+            if(states[i]==WaitableState::invalid){
+                NFS_RUNTIME_LOG(ANDROID_LOG_WARN,"NFSMW","WaitForMultipleObjects: handle %08x closed during wait; returning ERROR_INVALID_HANDLE",handles[i]);
+                lastError=6;ret(UINT32_MAX,4);return;
+            }
+            ready&=states[i]==WaitableState::ready;
+        }
         if(all){
-            if(std::all_of(handles.begin(),handles.end(),waitableReady)){
+            if(ready){
                 bool abandoned=false;for(uint32_t handle:handles)abandoned|=acquireWaitable(handle);
                 ret(abandoned?128:0,4);return;
             }
-        }else for(uint32_t i=0;i<count;++i)if(waitableReady(handles[i])){ret((acquireWaitable(handles[i])?128:0)+i,4);return;}
+        }else for(uint32_t i=0;i<count;++i)if(states[i]==WaitableState::ready){ret((acquireWaitable(handles[i])?128:0)+i,4);return;}
         if(timeout!=UINT32_MAX&&std::chrono::steady_clock::now()>=deadline){ret(258,4);return;}
         checkGuestProgress();yieldGuestMachine(1);
     }

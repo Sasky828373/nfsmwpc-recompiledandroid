@@ -93,3 +93,34 @@ was compiled for review; it has not yet been validated on tester hardware.
 
 
 The subsequent audio/frame-pacing release is documented in [AUDIO_FRAME_PACING.md](AUDIO_FRAME_PACING.md): ARM64 gameplay was exercised on the Redmi, both ABI APKs compile, and the final ARM64 releases install on the S25. Physical ARMv7 testing remains pending because only the ARM64-only S25 was connected at release time.
+
+
+## Lobby disconnect event race (2026-10-15, v0.1.3)
+
+An S25 session reproduced `Guest integration boundary: map::at: key not found`
+after WSACloseEvent during lobby teardown. The user reported the same failure
+on a Redmi Note 8, including the other phone when a player leaves before a
+race starts. Its preserved log independently showed the same boundary at
+16:46:28 and 17:36:55. Android recorded no native process crash: the runtime caught the
+exception and stopped guest execution.
+
+WaitForMultipleObjects originally validated handles only before entering its
+wait loop. A different guest thread could close an event while the waiter
+released the machine. The next iteration treated the missing event as a
+thread and called threadHandles.at(handle), which threw std::out_of_range.
+
+The wait now checks every object's state on every iteration, before acquiring
+any ready object. A handle closed during a wait returns WAIT_FAILED with
+ERROR_INVALID_HANDLE (6), rather than stopping guest execution. A handle
+already invalid on entry still fails immediately. Windows documents closing
+handles during a pending wait as undefined; this is a controlled failure for
+that race, not a claim of defined Windows close-during-wait semantics.
+
+The startup Winsock regression now closes an event through WSACloseEvent on
+another native thread while WSAWaitForMultipleEvents is blocked. All four
+combinations of wait-any/wait-all and first/last closed event return failure,
+preserve the surviving auto-reset signal, and maintain the five-argument
+32-bit guest stack ABI. The updated ARM64 build passed these checks on S25 and Redmi Note 8.
+Full remote-race completion and physical ARMv7 testing remain separate checks.
+
+API reference: [Microsoft WSAWaitForMultipleEvents](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsawaitformultipleevents).

@@ -1,5 +1,6 @@
 #include <set>
 #include <condition_variable>
+#include <exception>
 #include "guest_runtime.h"
 #include "android_resolution.h"
 #include "guest_memory.h"
