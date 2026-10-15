@@ -215,6 +215,7 @@ void yieldGuestMachine(unsigned milliseconds=0) {
     if(milliseconds)std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));else std::this_thread::yield();
     machineLease->lock();saved.load();
 }
+void pollGuestNetwork();
 void checkGuestProgress() {
     while(guestPaused.load()&&!stopRequested.load())yieldGuestMachine(20);
     if(stopRequested.load())throw GuestStop("Guest execution cancelled");
@@ -227,7 +228,7 @@ void checkGuestProgress() {
     if((++checkpoints&63u)==0){
         auto now=std::chrono::steady_clock::now();
         if(now>bootDeadline)throw GuestStop("CRT bring-up time budget reached at "+hex(g_cur_func));
-        if(now>=nextYield){yieldGuestMachine();nextYield=std::chrono::steady_clock::now()+std::chrono::microseconds(500);}
+        if(now>=nextYield){pollGuestNetwork();yieldGuestMachine();nextYield=std::chrono::steady_clock::now()+std::chrono::microseconds(500);}
     }
     if(!guestThreadFault.empty())throw GuestStop(guestThreadFault);
 }
@@ -652,6 +653,11 @@ extern "C" recomp_func_t recomp_lookup_import(uint32_t va) {
     return imports[index].function;
 }
 extern "C" void recomp_unresolved(const char* kind,uint32_t va,uint32_t from) {
+    NFS_RUNTIME_LOG(ANDROID_LOG_ERROR,"NFSMW","Unresolved %s %08x from %08x: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x esp=%08x",
+        kind,va,from,g_eax,g_ebx,g_ecx,g_edx,g_esi,g_edi,g_esp);
+    if(from==0x00826749u&&memory->readable(g_edi,24))
+        NFS_RUNTIME_LOG(ANDROID_LOG_ERROR,"NFSMW","Callback descriptor: %08x %08x %08x %08x %08x %08x",
+            read32(g_edi),read32(g_edi+4),read32(g_edi+8),read32(g_edi+12),read32(g_edi+16),read32(g_edi+20));
     throw GuestStop(std::string(kind)+" unresolved "+hex(va)+" from "+hex(from));
 }
 extern "C" void recomp_unimpl(uint32_t va,const char* what) {
@@ -691,7 +697,7 @@ std::string connectGuestRuntime(const char* executable) {
             float longSide=float(std::max(displayWidth.load(),displayHeight.load())),shortSide=float(std::min(displayWidth.load(),displayHeight.load()));
             float aspect=shortSide>0?longSide/shortSide:16.f/9.f;
             nfs_widescreen_set_display_aspect(aspect);
-            NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Widescreen: render width follows the display aspect %.3f, 3D FOV corrected (front end and HUD still 4:3)",aspect);
+            NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Wide display aspect %.3f; proportional HUD and original camera retained",aspect);
         }else NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","Widescreen disabled: original 4:3 geometry");
         memory->commit(stackBase,stackSize); memory->commit(tib,0x1000);
         State fresh; fresh.esp=stackBase+stackSize-64; fresh.fs=tib; fresh.load();
@@ -702,6 +708,7 @@ std::string connectGuestRuntime(const char* executable) {
         testGuestFileTime();
         testGuestCriticalSections();
         testGuestQsort();
+        testGuestNetwork();
         // Restore a clean CPU state before executing the real CRT entry.
         fresh.load();
         bindDeferredModuleImports();

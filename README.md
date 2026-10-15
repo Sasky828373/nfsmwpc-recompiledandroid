@@ -19,7 +19,7 @@ This is **not** an emulator and **not** a port of the Xbox 360 version: every fu
 | MW-M4/M5 CRT, memory, original entry point | ✅ |
 | MW-M6/M7 Win32, Direct3D 9, first frame | ✅ D3DX effects loaded from the game's own resources |
 | MW-M8/M9 Intro, menus, world | 🔧 3D world with traffic renders (≈1,450 draws/frame), 75 s+ without crashes; menus and input in progress |
-| MW-M10+ Racing, police, saving | ⏳ |
+| MW-M10+ Racing, police, saving | User-confirmed playable racing; stability and online races under validation |
 | Android ARM64 APK | Builds and runs: cinematics, menu input and user-confirmed gameplay; race quality/control validation ongoing |
 
 Android runtime fixes and current verification limits: [bring-up notes](docs/ANDROID_BRINGUP.md).
@@ -52,7 +52,7 @@ powershell -File scripts/test_windows.ps1   # windowed test run
 
 ### License and credits
 
-Code in this repository: see each file. pcrecomp by sp00nznet. *Need for Speed* is a trademark of Electronic Arts; this project is not affiliated with EA.
+Code in this repository: see each file. pcrecomp by sp00nznet. Proportional HUD adaptation follows ThirteenAG's WidescreenFix ([notice](THIRD_PARTY_NOTICES.md)). *Need for Speed* is a trademark of Electronic Arts; this project is not affiliated with EA.
 
 ---
 
@@ -76,7 +76,7 @@ Recompilación estática de la **versión de PC** de *Need for Speed: Most Wante
 | MW-M6/M7 Win32, Direct3D 9, primer frame | ✅ efectos D3DX cargados desde los recursos del propio juego |
 | MW-M8/M9 Intro, menús, mundo | 🔧 el mundo 3D con tráfico se dibuja (≈1.450 draws por frame), más de 75 s sin cierres; menús y controles en curso |
 | MW-M10+ Carreras, policía, guardado | ⏳ |
-| APK de Android ARM64 | ⏳ |
+| APK de Android ARM64 | Gameplay, imagen proporcional, acelerador y Esc confirmados en S25; estabilidad en pruebas |
 
 ### Compilación (Windows)
 

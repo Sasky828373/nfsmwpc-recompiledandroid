@@ -1,2 +1,15 @@
-# Most Wanted PC: render hooks disabled after the white-screen/FOV regression.
-# Reintroduce only after menu and gameplay transition validation.
+# Engine dimensions and HUD coordinates; retain original camera and post-processing.
+0x006C27F9  GetRacingResolution 640x480 return
+0x006C2810  GetRacingResolution 800x600 return
+0x006C2827  GetRacingResolution 1024x768 return
+0x006C283E  GetRacingResolution 1280x960 return
+0x006C2855  GetRacingResolution 1280x1024 return
+0x006C286C  GetRacingResolution 1600x1200/default return
+0x0056FED8  Frontend HUD center after original X write
+0x00584EFA  Frontend HUD center after original X write
+0x00599E84  Frontend HUD center after original X write
+0x0059A12B  Frontend HUD center after original X write
+0x0059A5B6  Frontend HUD center after original X write
+0x0059A849  Frontend HUD center after original X write
+0x005A44D0  Frontend HUD center after original X write
+0x006C9C5C  Mouse X in the same virtual HUD coordinates

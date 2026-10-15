@@ -164,7 +164,7 @@ def read_va_list(path):
 
 def cmd_lift(exe, catalog, outdir, split=400, names_path=None, prefix="", extra_exclude=None):
     import pefile
-    from lift32 import Lifter
+    from mw_lifter import Lifter
     info = analyze_pe(exe)
     iat = build_iat_map(info)
     module = os.path.basename(exe)

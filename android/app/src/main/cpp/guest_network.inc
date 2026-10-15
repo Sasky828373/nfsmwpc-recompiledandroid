@@ -26,6 +26,7 @@ struct Socket{int fd;bool guestNonBlocking=false,connecting=false,icmp=false;uin
     struct Counter{uint32_t sentPackets=0,sentBytes=0,receivedPackets=0,receivedBytes=0;};
     std::map<std::string,Counter> traffic;std::chrono::steady_clock::time_point nextSummary{};};
 std::map<uint32_t,Socket> sockets;
+void cancelReceives(uint32_t socket);
 uint32_t nextHandle=0x1000,startups=0,hostent=0;
 
 uint32_t wsaError(int error){
@@ -183,7 +184,7 @@ void wsaStartup(){
 }
 void wsaCleanup(){
     if(!net::startups){lastError=net::wsaNotinitialised;ret(net::socketError,0);return;}
-    if(!--net::startups){for(auto& entry:net::sockets)::close(entry.second.fd);net::sockets.clear();}
+    if(!--net::startups){for(auto& entry:net::sockets){net::cancelReceives(entry.first);::close(entry.second.fd);}net::sockets.clear();}
     ret(0,0);
 }
 void wsaGetLastError(){ret(lastError,0);}
@@ -216,7 +217,7 @@ void socketCreate(){
 void socketClose(){
     auto found=net::sockets.find(arg(0));
     if(found==net::sockets.end()){ret(net::fail(net::wsaEnotsock),1);return;}
-    ::close(found->second.fd);net::sockets.erase(found);ret(0,1);
+    net::cancelReceives(arg(0));::close(found->second.fd);net::sockets.erase(found);ret(0,1);
 }
 void socketBind(){
     auto* socket=net::find(arg(0));if(!socket){ret(net::fail(net::wsaEnotsock),3);return;}
@@ -568,7 +569,10 @@ void netbios(){
 // TAPI: no modems on Android. lineInitialize fails, so modem play is never offered.
 void lineInitialize(){NFS_RUNTIME_LOG(ANDROID_LOG_INFO,"NFSMW","TAPI: lineInitialize -> LINEERR_NODRIVER");ret(0x80000043u,5);}
 void lineShutdown(){ret(0x80000034u,1);}  // LINEERR_INVALAPPHANDLE: nothing was initialized
+#include "guest_network_overlapped.inc"
 const std::map<std::string,recomp_func_t> networkFunctions={
+    {"WSACreateEvent",wsaCreateEvent},{"WSACloseEvent",wsaCloseEvent},{"WSAResetEvent",wsaResetEvent},{"WSASetEvent",wsaSetEvent},
+    {"WSAWaitForMultipleEvents",wsaWaitForMultipleEvents},{"WSARecv",wsaRecv},{"WSARecvFrom",wsaRecvFrom},{"WSAGetOverlappedResult",wsaGetOverlappedResult},
     {"#1",socketAccept},{"#2",socketBind},{"#3",socketClose},{"#4",socketConnect},{"#5",socketPeerName},{"#6",socketLocalName},
     {"#7",socketGetOption},{"#8",hostToNetLong},{"#9",hostToNetShort},{"#14",hostToNetLong},{"#15",hostToNetShort},
     {"getsockopt",socketGetOption},{"htonl",hostToNetLong},{"htons",hostToNetShort},{"ntohl",hostToNetLong},{"ntohs",hostToNetShort},

@@ -1,31 +1,66 @@
-# Android bring-up ? 2026-10-14
+# Android bring-up - 2026-10-15
 
 Target: original PC speed.exe SHA-256 80774c2e5d619b4f120b48d4462896fd504c263399d203a238769cffde1d253c.
 
 ## Runtime and input
 
-D3DX qsort comparators use cdecl. The host now removes the two callback arguments after each comparison. A startup regression checks sorting, duplicate values, register preservation and stack balance through the guest ABI.
+D3DX qsort comparators use cdecl. The host removes both callback arguments after each comparison; startup checks sorting, duplicates, preserved registers and stack balance. Android keyboard/mouse Acquire uses the default nonexclusive background cooperative level, as verified against real Windows DirectInput.
 
-Windows DirectInput keyboard/mouse devices allow Acquire with their default nonexclusive background cooperative level; `tests/directinput_defaults.c` exercises the real Windows API. Android now supplies that default. Absolute mouse clicks no longer depend on an Underground-specific mouse-object address. Virtual window activation sends focus messages.
+Most Wanted polls raw keyboard snapshots. Its GameFlow state 6 selects driving controls. Gas is Up, brake/reverse Down, handbrake Space, nitrous Left Alt, shifts Left Shift/Control, reset R, camera C. The menu X sends **Esc (DIK 0x01)**. The user confirmed gas and X work after installing the updated APK. Menu touches include a visible pointer.
 
-A joystick source alone is insufficient to identify a controller: Redmi's uinput-fpc fingerprint sensor exposes only Z. Joystick devices require both X and Y ranges; true gamepad sources remain supported.
+All three PC ports distinguish physical gamepad sources and joystick devices with both X/Y axes from fingerprint sensors advertising only a Z axis. Connecting a controller hides touch controls; touching the screen reveals them. Repeated device enumeration no longer hides them again after that touch. Bluetooth hardware testing remains pending because no controller was available.
 
-Most Wanted uses raw keyboard snapshots instead of Underground driving action maps. The touch layout observes MW GameFlow at 0x925E90 (state 6), sampled on the guest thread. Nitrous maps to Left Alt, handbrake to Space, manual shifts to Left Shift/Control. A visible touch pointer is drawn in menus.
+## Proportional rendering
 
-## Rendering recovery
+The earlier camera/FOV and motion-blur experiments were removed after a white-screen/fisheye regression. The current adaptation changes engine dimensions and HUD coordinates while retaining the original camera and post-processing instructions. The user confirmed the corrected image on the S25.
 
-The experimental resolution, camera, HUD and motion-blur hooks introduced a reported white-screen and fisheye regression. All thirteen sites are now removed from config/hooks.txt and from the generated functions. The original engine projection and 640x480 startup preset are restored. Launcher resolution modes are still advertised; forcing arbitrary engine dimensions is disabled pending complete transition validation.
+Resolution returns use the launcher-selected render dimensions. The 720p preset preserves the display aspect ratio (1560x720 on a 2340x1080 display). HUD horizontal scale/center, frontend origins and mouse coordinates use the same aspect ratio, based on [ThirteenAG's WidescreenFix](https://github.com/ThirteenAG/WidescreenFixesPack/tree/master/source/NFSMostWanted.WidescreenFix). See THIRD_PARTY_NOTICES.md. The x86 ASI itself is not loaded on ARM64. The in-game selector still returns launcher-selected dimensions; separate selectable in-game modes are not implemented.
 
-`python scripts/relift_hooks.py` now also discovers previously generated hook sites, so deleting a configured hook actually removes it from local generated code. A fresh full lift uses the empty hook configuration.
+The independent depth-reference correction remains: MW copies its initial depth surface from 0x982A2C to descriptor 0x93DAC4 without AddRef and later releases both. The bridge retains the descriptor reference.
 
-The independent depth-reference correction remains: MW copies the initial depth surface from 0x982A2C to descriptor 0x93DAC4 without AddRef, then releases both. The bridge retains the descriptor reference instead of accepting stale COM handles.
+## Race crashes
 
-Widescreen implementation reference for future work: https://github.com/ThirteenAG/WidescreenFixesPack/tree/master/source/NFSMostWanted.WidescreenFix
+A computed tail jump inside CRT memmove (0x7C4840, missed interior target 0x7C4AFC) is replaced with native memmove using the original cdecl ABI. tests/memmove_override.c checks 4,825 overlap/alignment/length and zero-length cases, guards, EAX and ESP.
 
-## Validation and limits
+The later null callback at 0x826749 traced to sound gain routine 0x81CDC6. At 0x81CE0E it compares a channel index with -1, then executes FUCOMPP before the integer JNE at 0x81CE1C. The shared lifter incorrectly treated FUCOMPP as an integer flag setter. An all-channel update then became a single-channel write at voice + 0x13C - 0x24 = voice + 0x118, corrupting the effects descriptor. The logged 0x432F4047 was a floating-point gain, not a callback address.
 
-Android assembleDebug and Windows host builds pass after rollback. On-device qsort ABI checks pass. The recovery APK created its original 640x480 backbuffer, loaded the saved profile paulo, reached the main menu and opened Options without the previous white-screen during this test. The user previously reached gameplay; sustained race transitions after recovery remain to be checked. The touch-control fixes are retained.
+scripts/mw_lifter.py preserves integer flags for legacy x87 compares and FTST. FNSTSW still exposes the x87 result, and TEST/SAHF still explicitly transfer it to integer flags. FCOMI/FUCOMI variants keep their existing separate behavior. This correction is local to this project and does not edit the sibling pcrecomp checkout.
 
-The existing Internet backend defaults to eahub.eu, with EA-host DNS redirection and Android Internet permission. DNS resolves, but this is not evidence of successful PC Most Wanted login or an Internet race. Community server compatibility, credentials and a real session remain unverified.
+Both full generation and incremental relifting use the corrected lifter. To repair an existing local translation:
 
-No game files, generated translations, logs or APK are included in this repository.
+```powershell
+python scripts/relift_hooks.py --x87-flags
+```
+
+Deleting hooks also removes their previously generated sites. Generated C remains local and ignored.
+
+In a VS developer prompt, with capstone, pefile and Unicorn installed:
+
+```powershell
+python tests/sound_channel_flags.py
+# Optional: reproduce the old lifter's known corruption too.
+python tests/sound_channel_flags.py --prove-old-bug
+```
+
+The test compares the actual locally supplied sound routine with x86 execution over 16 channel/gain combinations, including -1, checking all general registers, stack cleanup, the complete voice object and surrounding guards. The old lift reproduces the overwritten descriptor; the corrected lift matches all cases.
+
+## Online / LAN
+
+The Android Winsock adapter now implements event creation/reset/set/close/waits and WSARecv/WSARecvFrom/WSAGetOverlappedResult, including pending scatter receives, event signaling, completion bytes/flags and cancellation on socket close. Pending operations are pumped nonblockingly during guest waits and scheduler yields.
+
+A startup loopback regression exercises the actual HLE calls and their guest stack cleanup: timeout, event signal/reset, pending UDP scatter receive, incomplete/completed results and socket-close cancellation. This passed on the S25. Opening network menus reached a game lobby without the previous missing-WSAWaitForMultipleEvents crash.
+
+The backend defaults to eahub.eu with EA-host DNS redirection. DNS resolution, backend TCP connection and a visible lobby do **not** prove successful community-server login or an Internet race. A real remote session remains unverified. Receive completion routines/APCs and overlapped ICMP receives return unsupported errors; the tested game path uses events.
+
+## Final validation
+
+Android builds for all three ports and the MW Windows host build pass. The
+updated APKs install over the existing S25 apps without clearing their data.
+The MW startup Winsock regression passes, including two independent events.
+The updated game reaches a quick race, accelerates and progresses along the
+track; nitrous sends DIK 0x38 and pause/back sends DIK 0x01. A brief driving
+test did not reproduce the null sound callback. Sustained play and a complete
+race remain to be tested. The game was left paused after the test.
+
+No game files, generated translations or logs are included in source control.
+Release APKs are published separately as GitHub release assets.

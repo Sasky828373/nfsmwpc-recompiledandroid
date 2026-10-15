@@ -1,1 +1,2 @@
 # Most Wanted PC: no addresses imported from Underground.
+0x007C4840  CRT memmove: complete overlapping copy including indirect interior jump-table entries

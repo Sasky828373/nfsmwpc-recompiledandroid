@@ -113,8 +113,9 @@ std::pair<int32_t,int32_t> pointerInWindow(){
     int32_t width=std::max(window->second.width,1),height=std::max(window->second.height,1);
     // Speed.exe's window: client pixels are its back buffer (0x71A96C), as GetClientRect reports.
     if(game::presentParams&&activeWindow==(game::windowHandle?read32(game::windowHandle):0u)){int32_t w=int32_t(read32(game::presentParams)),h=int32_t(read32(game::presentParams+4));if(w>0&&h>0&&w<=8192&&h<=8192){width=w;height=h;}}
-    // Invert the centered HUD projection so menu hit tests follow the touch.
-    float x=(guestPointerX.load()-.5f)*(nfs_widescreen_hud_pos_x()/320.f)+.5f;
+    // The MW mouse conversion hook maps its 640-unit X into HUD units.
+    // GetCursorPos itself stays in window pixels; do not scale twice.
+    float x=guestPointerX.load();
     return {std::clamp(int32_t(x*float(width)),0,width-1),std::min(int32_t(guestPointerY.load()*float(height)),height-1)};
 }
 void enqueueGuestPointer(int phase){  // 0 down, 1 move, 2 up

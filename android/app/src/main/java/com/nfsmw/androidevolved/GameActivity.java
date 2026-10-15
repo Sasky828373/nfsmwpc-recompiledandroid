@@ -102,8 +102,7 @@ public final class GameActivity extends NativeActivity {
             if(device==null||device.isVirtual())continue;
             int sources=device.getSources();
             boolean buttons=(sources&android.view.InputDevice.SOURCE_GAMEPAD)==android.view.InputDevice.SOURCE_GAMEPAD;
-            // Redmi's fingerprint sensor (uinput-fpc) reports JOYSTICK with
-            // only ABS_Z. A joystick controller must expose a real X/Y stick.
+            // Some fingerprint sensors advertise JOYSTICK with only a Z axis.
             boolean stick=(sources&android.view.InputDevice.SOURCE_JOYSTICK)==android.view.InputDevice.SOURCE_JOYSTICK&&
                     device.getMotionRange(android.view.MotionEvent.AXIS_X)!=null&&
                     device.getMotionRange(android.view.MotionEvent.AXIS_Y)!=null;

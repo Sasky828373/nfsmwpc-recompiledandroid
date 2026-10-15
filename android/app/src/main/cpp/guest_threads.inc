@@ -203,6 +203,7 @@ void waitMultiple(){
     auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout);
     WaitScope scope(all?"WaitForMultipleObjects(all)":"WaitForMultipleObjects(any)",handles[0]);
     for(;;){
+        pollGuestNetwork();
         if(all){
             if(std::all_of(handles.begin(),handles.end(),waitableReady)){
                 bool abandoned=false;for(uint32_t handle:handles)abandoned|=acquireWaitable(handle);
