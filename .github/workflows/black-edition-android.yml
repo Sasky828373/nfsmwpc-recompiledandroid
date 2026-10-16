@@ -1,0 +1,34 @@
+name: Android Black Edition build
+on:
+  push:
+    branches: [fix/black-edition-pe-support]
+  workflow_dispatch:
+jobs:
+  android-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check generated code prerequisites
+        shell: bash
+        run: |
+          for p in src/recomp/gen src/recomp/gen_server src/recomp/gen_d3dx src/recomp/gen_abk; do
+            if [ ! -d "$p" ] || [ -z "$(find "$p" -name '*.c' -print -quit)" ]; then
+              echo "::error::Missing generated source $p. Generate from your own game files before building."
+              exit 1
+            fi
+          done
+          for p in ../pcrecomp ../nfsu2-recompiled; do
+            if [ ! -d "$p" ]; then echo "::error::Missing dependency checkout $p"; exit 1; fi
+          done
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Build arm64 APK
+        working-directory: android
+        run: bash ./gradlew assembleDebug --no-daemon -PnfsAbi=arm64-v8a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nfsmwpc-black-edition-arm64
+          path: android/app/build/outputs/apk/debug/*.apk
