@@ -550,8 +550,17 @@ void loadImage(const char* path) {
         nt.FileHeader.SizeOfOptionalHeader<sizeof(pe_opt_header32)) throw GuestStop("Expected x86 PE32");
     auto opt=nt.OptionalHeader; imageBase=opt.ImageBase; imageSize=opt.SizeOfImage;
     resourceRva=opt.DataDirectory[2].VirtualAddress;resourceSize=opt.DataDirectory[2].Size;
-    if (imageBase!=0x400000 || imageSize!=0x678e4e || opt.AddressOfEntryPoint!=0x3c4040)  // speed.exe (Most Wanted, SHA-256 80774c2e...253c)
-        throw GuestStop("PE layout does not match generated NFSMW code");
+    // Both supported PC executables have identical .text, .rdata and .data
+    // sections and the same entry point. Black Edition differs in its PE
+    // resources and the trailing unnamed section's RVA.
+    const bool standardImage = imageSize == 0x678e4e;
+    const bool blackEditionImage = imageSize == 0x660000;
+    if (imageBase != 0x400000 || opt.AddressOfEntryPoint != 0x3c4040 ||
+        (!standardImage && !blackEditionImage))
+        throw GuestStop("PE layout does not match supported NFSMW PC editions");
+    // Reserve the full original recompilation image range even for the smaller
+    // Black Edition, because generated guest code uses fixed virtual addresses.
+    if (blackEditionImage) imageSize = 0x678e4e;
     // The loader maps whole pages: speed.exe's SizeOfImage (0x678E4E) is not
     // page aligned and its last section's raw data runs to 0x679000.
     imageSize=(imageSize+0xfffu)&~0xfffu;
